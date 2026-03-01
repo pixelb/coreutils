@@ -1684,11 +1684,7 @@ main (int argc, char **argv)
     error (EXIT_FAILURE, errno, "%s", quotef (infile));
 
   if (in_blk_size == 0)
-    {
-      in_blk_size = io_blksize (&in_stat_buf);
-      if (SYS_BUFSIZE_MAX < in_blk_size)
-        in_blk_size = SYS_BUFSIZE_MAX;
-    }
+    in_blk_size = io_blksize (&in_stat_buf);
 
   char *buf = xalignalloc (page_size, in_blk_size + 1);
   ssize_t initial_read = -1;
