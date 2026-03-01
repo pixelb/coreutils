@@ -194,6 +194,7 @@
 /po/remove-potcdate.sed
 /po/remove-potcdate.sin
 /po/stamp-po
+/src/buz-seed.c
 /src/coreutils.h
 /src/coreutils_shebangs
 /src/coreutils_symlinks

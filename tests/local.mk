@@ -459,6 +459,9 @@ all_tests =					\
   tests/split/suffix-length.sh			\
   tests/split/additional-suffix.sh		\
   tests/split/b-chunk.sh			\
+  tests/split/bytes-cdc.sh			\
+  tests/split/bytes-cdc-offbyone.sh		\
+  tests/split/random-source.sh			\
   tests/split/fail.sh				\
   tests/split/lines.sh				\
   tests/split/line-bytes.sh			\

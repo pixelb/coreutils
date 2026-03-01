@@ -217,6 +217,13 @@ if test $gl_gcc_warnings != no; then
     [# -fanalyzer and related options slow GCC considerably.
      ew="$ew -fanalyzer -Wno-analyzer-malloc-leak"])
 
+  if test $gl_gcc_warnings = expensive \
+      && test -d "$srcdir"/.git && \
+      ! test -f "$srcdir"/.tarball-version
+  then
+    AC_DEFINE([DEBUG_EXPENSIVE], [1], [enable expensive run-time tests])
+  fi
+
   # This, $nw, is the list of warnings we disable.
   nw=$ew
   nw="$nw -Wstack-protector"        # not worth working around for pre GCC 15

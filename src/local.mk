@@ -74,6 +74,8 @@ EXTRA_DIST +=		\
   src/dircolors.hin	\
   src/make-prime-list.c	\
   src/primes.h		\
+  src/make-buz-table.c	\
+  src/buz-seed.c	\
   src/crctab.c		\
   src/tac-pipe.c	\
   src/extract-magic	\
@@ -425,7 +427,7 @@ src_arch_SOURCES = src/uname.c src/uname-arch.c
 src_cut_SOURCES = src/cut.c src/set-fields.c
 src_numfmt_SOURCES = src/numfmt.c src/set-fields.c
 
-src_split_SOURCES = src/split.c src/temp-stream.c
+src_split_SOURCES = src/split.c src/temp-stream.c src/buz-seed.c src/split_cdc.c
 src_tac_SOURCES = src/tac.c src/temp-stream.c
 
 src_tail_SOURCES = src/tail.c src/iopoll.c
@@ -631,6 +633,22 @@ $(top_srcdir)/src/crctab.c: $(top_srcdir)/src/cksum_crc.c
 	  && chmod a-w $@-t \
 	  && mv $@-t $@ \
 	  && rm -rf $(top_srcdir)/src/crctab-tmp; \
+	fi
+
+# Default buz-seed.c is also built like primes.h and crctab.
+BUILT_SOURCES += $(top_srcdir)/src/buz-seed.c
+$(top_srcdir)/src/buz-seed.c: $(top_srcdir)/src/make-buz-table.c
+	$(AM_V_GEN)if test -n '$(BUILD_CC)'; then \
+	  $(MKDIR_P) $(top_srcdir)/src/buz-tmp \
+	  && (cd $(top_srcdir)/src/buz-tmp \
+	      && $(BUILD_CC) $(BUILD_CPPFLAGS) $(BUILD_CFLAGS) \
+		$(BUILD_LDFLAGS) -o make-buz-table$(EXEEXT) \
+		$(abs_top_srcdir)/src/make-buz-table.c) \
+	  && rm -f $@ $@-t \
+	  && $(top_srcdir)/src/buz-tmp/make-buz-table$(EXEEXT) > $@-t \
+	  && chmod a-w $@-t \
+	  && mv $@-t $@ \
+	  && rm -rf $(top_srcdir)/src/buz-tmp; \
 	fi
 
 # false exits nonzero even with --help or --version.

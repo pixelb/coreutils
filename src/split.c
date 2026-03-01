@@ -27,6 +27,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <spawn.h>
+#include <endian.h>
 
 #include "system.h"
 #include "alignalloc.h"
@@ -37,6 +38,7 @@
 #include "full-write.h"
 #include "ioblksize.h"
 #include "quote.h"
+#include "randperm.h"
 #include "sig2str.h"
 #include "sys-limits.h"
 #include "temp-stream.h"
@@ -44,6 +46,7 @@
 #include "xbinary-io.h"
 #include "xdectoint.h"
 #include "xstrtol.h"
+#include "split_cdc.h"
 
 /* The official name of this program (e.g., no 'g' prefix).  */
 #define PROGRAM_NAME "split"
@@ -51,6 +54,10 @@
 #define AUTHORS \
   proper_name_lite ("Torbjorn Granlund", "Torbj\303\266rn Granlund"), \
   proper_name ("Richard M. Stallman")
+
+#define ARRAY_SIZE(a) (sizeof (a) / sizeof ((a)[0]))
+
+enum { N_CHARS = UCHAR_MAX + 1 };
 
 /* Shell command to filter through, instead of creating files.  */
 static char const *filter_command;
@@ -114,12 +121,82 @@ static bool unbuffered;
 /* The character marking end of line.  Defaults to \n below.  */
 static int eolchar = -1;
 
+/* Lookup table mapping u8 to u32|u64 for Cdc_type functions.  */
+void const *cdc_table;
+
+/* Precomputing window-dependent unbuz table speeds BUZHash up measurably.
+   buz32: -35% cycles, buz64: -26% cycles @ Intel Core i7-6600U (Skylake) */
+void const *unbuz_table;
+
+/* Some assertions are measurably expensive to check.  NDEBUG is nice idea, but
+   some downstreams keep NDEBUG unset, so user should not pay for tests.  */
+static bool const TEST =
+#if defined DEBUG_EXPENSIVE
+    true
+#else
+    false
+#endif
+    ;
+
 /* The split mode to use.  */
 enum Split_type
 {
   type_undef, type_bytes, type_byteslines, type_lines, type_digits,
+  type_bytes_cdc,
   type_chunk_bytes, type_chunk_lines, type_rr
 };
+
+enum Cdc_type
+{
+  cdc_buz32, cdc_buz64, cdc_gear32, cdc_gear64,
+  cdc_undef = -1 /* undef is the last one */
+};
+
+static char const *cdc_names[] = { "buz32", "buz64", "gear32", "gear64" };
+static cdchash_fn const cdc_hash[] = { buz32, buz64, gear32, gear64 };
+static cdcfind_fn const cdc_find[]
+    = { buz32_find, buz64_find, gear32_rawfind, gear64_rawfind };
+/* BUZHash default follows default value used by BorgBackup.  */
+static int const cdc_window_default[] = { 4095, 4095, 32, 64 };
+static int const cdc_window_min[] = { 4, 8, 32, 64 };
+
+static bool
+cdc_isbuz (enum Cdc_type hash)
+{
+  return hash == cdc_buz32 || hash == cdc_buz64;
+}
+
+static bool
+cdc_isgear (enum Cdc_type hash)
+{
+  return hash == cdc_gear32 || hash == cdc_gear64;
+}
+
+static bool
+cdc_is64 (enum Cdc_type hash)
+{
+  return hash == cdc_gear64 || hash == cdc_buz64;
+}
+
+static bool
+cdc_is32 (enum Cdc_type hash)
+{
+  return hash == cdc_gear32 || hash == cdc_buz32;
+}
+
+/* TODO: should getcachelinesize() be moved next to getpagesize() ?  */
+static idx_t
+getcachelinesize (void)
+{
+#ifdef LEVEL1_DCACHE_LINESIZE
+  idx_t cacheline_size = sysconf (LEVEL1_DCACHE_LINESIZE);
+#else
+  idx_t cacheline_size = -1;
+#endif
+  if (cacheline_size < 0)
+    cacheline_size = CDC_TABLE_DEFAULT_ALIGNAS;
+  return cacheline_size;
+}
 
 /* For long options that have no equivalent short option, use a
    non-character as a pseudo short option, starting with CHAR_MAX + 1.  */
@@ -128,7 +205,8 @@ enum
   VERBOSE_OPTION = CHAR_MAX + 1,
   FILTER_OPTION,
   IO_BLKSIZE_OPTION,
-  ADDITIONAL_SUFFIX_OPTION
+  ADDITIONAL_SUFFIX_OPTION,
+  RANDOM_SOURCE_OPTION
 };
 
 static struct option const longopts[] =
@@ -145,6 +223,8 @@ static struct option const longopts[] =
   {"numeric-suffixes", optional_argument, NULL, 'd'},
   {"hex-suffixes", optional_argument, NULL, 'x'},
   {"filter", required_argument, NULL, FILTER_OPTION},
+  {"random-source", required_argument, NULL,
+   RANDOM_SOURCE_OPTION},
   {"verbose", no_argument, NULL, VERBOSE_OPTION},
   {"separator", required_argument, NULL, 't'},
   {"-io-blksize", required_argument, NULL,
@@ -245,7 +325,7 @@ default size is 1000 lines, and default PREFIX is 'x'.\n\
 "));
       oputs (_("\
   -b, --bytes=SIZE\n\
-         put SIZE bytes per output file\n\
+         put SIZE bytes per output file; see explanation below\n\
 "));
       oputs (_("\
   -C, --line-bytes=SIZE\n\
@@ -293,12 +373,25 @@ default size is 1000 lines, and default PREFIX is 'x'.\n\
          immediately copy input to output with '-n r/...'\n\
 "));
       oputs (_("\
+      --random-source=FILE\n\
+         get random seed for content-defined chunking from FILE\n\
+"));
+      oputs (_("\
       --verbose\n\
          print a diagnostic just before each output file is opened\n\
 "));
       oputs (HELP_OPTION_DESCRIPTION);
       oputs (VERSION_OPTION_DESCRIPTION);
       emit_size_note ();
+      fputs (_("\n\
+SIZE may also be:\n\
+  N            N bytes with optional unit\n\
+  HASH/N       N bytes on average using HASH for content-defined chunking,\n\
+               HASH may be gear32, gear64, buz32 and buz64\n\
+  HASH[W]/N    N bytes on average while hashing sliding window of W bytes\n\
+  HASH/N/K     N bytes on average but K bytes at most\n\
+  HASH[W]/N/K  like HASH[W]/N and HASH/N/K combined\n\
+"), stdout);
       fputs (_("\n\
 CHUNKS may be:\n\
   N       split into N files based on size of input\n\
@@ -780,6 +873,264 @@ bytes_split (intmax_t n_bytes, intmax_t rem_bytes,
      FIXME: Should we do this before EXIT_FAILURE?  */
   while (opened++ < max_files)
     cwrite (true, NULL, 0);
+}
+
+/* gcc 13.4.0 @cfarm136 warns with -Werror=suggest-attribute=cold about these
+   hash functions.  The warning is just wrong, gcc 14.3.0 and 15.2.0 are happy.
+   Moreover, __attribute__((hot)) does not prevent the warning!  */
+extern void
+buz32 (void *phash_, unsigned char const *p, idx_t count)
+{
+  uint32_t *const phash = phash_;
+  uint32_t const *const buz = cdc_table;
+  uint32_t hash = *phash;
+  affirm (count >= 1);
+  for (unsigned char const *end = p + count; p != end; p++)
+    hash = rotl32 (hash, 1) ^ buz[*p];
+  *phash = hash;
+}
+
+extern void
+buz64 (void *phash_, unsigned char const *p, idx_t count)
+{
+  affirm (count >= 1);
+  uint64_t *const phash = phash_;
+  uint64_t const *const buz = cdc_table;
+  uint64_t hash = *phash;
+  for (unsigned char const *end = p + count; p != end; p++)
+    hash = rotl64 (hash, 1) ^ buz[*p];
+  *phash = hash;
+}
+
+extern void
+gear32 (void *phash_, unsigned char const *p, idx_t count)
+{
+  affirm (count >= 1);
+  uint32_t *const phash = phash_;
+  uint32_t const *const cdc = cdc_table;
+  uint32_t hash = *phash;
+  for (unsigned char const *end = p + count; p != end; p++)
+    hash = (hash << 1) + cdc[*p];
+  *phash = hash;
+}
+
+extern void
+gear64 (void *phash_, unsigned char const *p, idx_t count)
+{
+  affirm (count >= 1);
+  uint64_t *const phash = phash_;
+  uint64_t const *const cdc = cdc_table;
+  uint64_t hash = *phash;
+  for (unsigned char const *end = p + count; p != end; p++)
+    hash = (hash << 1) + cdc[*p];
+  *phash = hash;
+}
+
+static char const*
+gear32_terminator_alloc (void)
+{
+  uint32_t const *const cdc = cdc_table;
+
+  /* Find a character in CDC table with the LSB being 0-bit and 1-bit.  */
+  unsigned char zero, one;
+  idx_t i;
+  for (i = 0; i < N_CHARS && (cdc[i] & 1) != 0; i++)
+    ;
+  zero = i;
+  for (i = 0; i < N_CHARS && (cdc[i] & 1) != 1; i++)
+    ;
+  one = i;
+  /* Chance of the LSB being equal across 256 random values is 2^-255.  */
+  if ((cdc[zero] & 1) != 0 || (cdc[one] & 1) != 1)
+    error (EXIT_FAILURE, 0, _("low-entropy --random-source"));
+
+  uint32_t hash = 0; /* Zero is the target value */
+  idx_t const window = sizeof (hash) * CHAR_WIDTH;
+  char *t = xmalloc (window);
+  for (i = window - 1; i >= 0; i--)
+    {
+      unsigned char c = (hash & 1) ? one : zero;
+      t[i] = (char)c;
+      hash = (hash - cdc[c]) >> 1;
+    }
+  if (TEST)
+    assure ((hash = 0, gear32 (&hash, (void *)t, window), hash == 0));
+  return t;
+}
+
+static char const*
+gear64_terminator_alloc (void)
+{
+  uint64_t const *const cdc = cdc_table;
+
+  /* Find a character in CDC table with the LSB being 0-bit and 1-bit.  */
+  unsigned char zero, one;
+  idx_t i;
+  for (i = 0; i < N_CHARS && (cdc[i] & 1) != 0; i++)
+    ;
+  zero = i;
+  for (i = 0; i < N_CHARS && (cdc[i] & 1) != 1; i++)
+    ;
+  one = i;
+  /* Chance of the LSB being equal across 256 random values is 2^-255.  */
+  if ((cdc[zero] & 1) != 0 || (cdc[one] & 1) != 1)
+    error (EXIT_FAILURE, 0, _("low-entropy --random-source"));
+
+  uint64_t hash = 0; /* Zero is the target value */
+  idx_t const window = sizeof (hash) * CHAR_WIDTH;
+  char *t = xmalloc (window);
+  for (i = window - 1; i >= 0; i--)
+    {
+      unsigned char c = (hash & 1) ? one : zero;
+      t[i] = (char)c;
+      hash = (hash - cdc[c]) >> 1;
+    }
+  if (TEST)
+    assure ((hash = 0, gear64 (&hash, (void *)t, window), hash == 0));
+  return t;
+}
+
+/* Split into pieces of approximately AVGSZ bytes, not larger than MAXSZ bytes,
+   using content-defined chunking with rolling HASH running over sliding window
+   of WIN bytes.  Use buffer BUF of IOSZ bytes for I/O.  The buffer has WINDOW
+   bytes prepended and a trailer of WINDOW bytes for GearHash terminator.  */
+static void
+bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
+                 intmax_t const maxsz, idx_t const window, char *const buf,
+                 idx_t const iosz)
+{
+  static_assert (UINT64_MAX <= UINTMAX_MAX);
+  affirm (1 <= window && window <= avgsz && avgsz < maxsz && window <= iosz);
+  /* The adjustment matters when AVGSZ is close to WINDOW as the code does not
+     run Bernoulli trials against the hashes of the first WINDOW-1 bytes.  */
+  intmax_t const avgadj = avgsz - (window - 1);
+  /* Following idea of Daniel Lemire's paper "Fast Random Integer Generation
+     in an Interval" paper we approximate chunk size with Bernoulli probability
+     of 1/AVGSZ moved from floating point [0.0…1.0) domain to u32|u64.  */
+  uint32_t const le32 = cdc_is32 (hash) ? UINT32_MAX / avgadj : 0;
+  uint64_t const le64 = cdc_is64 (hash) ? UINT64_MAX / avgadj : 0;
+  void const *const ple = cdc_is32 (hash)   ? &le32
+                          : cdc_is64 (hash) ? &le64
+                                            : (affirm (false), NULL);
+  /* BUZHash and GearHash handle initial state differently.  GearHash
+     completely forgets initial state as the WINDOW bytes pass by.  BUZHash
+     continues to rotate bits of the initial state forever as that state is
+     never "shifted out".  Initial BUZHash value should be symmetric against
+     all barrel shifts: it should be either 0 or ~0, BUZHash becomes dependent
+     on offset of the WINDOW modulo UINT_WIDTH otherwise.  */
+  uint32_t hash32 = 0;
+  uint64_t hash64 = 0;
+  void *const phash = cdc_is32 (hash)   ? &hash32
+                      : cdc_is64 (hash) ? &hash64
+                                        : (affirm (false), NULL);
+  /* We can't rely on terminator to be intact in the trailer area right after
+     I/O buffer as short read() might return just a few bytes less than IOSZ.
+     That's why possible positions of multi-byte terminators might overlap
+     during different loop iterations and may overwrite each other.  Also,
+     reading file from disk usually returns full IOSZ buffer, but pipe and TCP
+     socket behave differently.  E.g. pipe has 64 KiB capacity limit on Linux
+     and socket buffer is scaled dynamically.  */
+  ssize_t terminator_at = 0;
+  char const *const terminator
+      = (hash == cdc_gear32)   ? gear32_terminator_alloc ()
+        : (hash == cdc_gear64) ? gear64_terminator_alloc ()
+                               : NULL;
+  cdchash_fn const hashcall = cdc_hash[hash];
+  cdcfind_fn const findcall = cdc_find[hash];
+
+  bool new_file_flag = true;
+  bool filter_ok = true;
+  intmax_t write_at_most = maxsz;
+  idx_t to_gulp = window;
+  ssize_t n_read;
+
+  while ((n_read = read (STDIN_FILENO, buf, iosz)) > 0)
+    {
+      char *const eob = buf + n_read;
+      if (n_read != terminator_at && terminator)
+        {
+          memcpy (eob, terminator, window);
+          terminator_at = n_read;
+        }
+
+      /* So, we have some buffer with at least WINDOW bytes of data prepended
+         to it.  We need to find few points in the buffer.  The points, where:
+         1) HASH of initial WINDOW is ready, all bytes are gulped,
+         2) MAXSZ is reached, 3) HASH <= LE, 4) end of buffer resides.  */
+      for (char const *start = buf; start != eob;)
+        {
+          typedef unsigned char const cuchar_t;
+          idx_t const startsz = eob - start;
+          char const *const max_end
+              = write_at_most <= startsz ? start + write_at_most : NULL;
+          char const *hash_end = NULL;
+          char const *unread = start;
+
+          if (to_gulp)
+            {
+              idx_t const gulpable = MIN (startsz, to_gulp);
+              hashcall (phash, (cuchar_t*)start, gulpable);
+              to_gulp -= gulpable;
+              unread += gulpable;
+              if (!to_gulp && (hash32 <= le32 && hash64 <= le64))
+                hash_end = unread;
+            }
+
+          if (!hash_end && unread != eob)
+            {
+              char const *const le_at = (char const *)findcall (
+                  phash, ple, (cuchar_t *)unread, (cuchar_t *)eob, window);
+              if (le_at < eob)
+                unread = hash_end = (le_at + 1);
+              else
+                unread = eob;
+            }
+
+          if (TEST && hash_end)
+            {
+              void const *const last = hash_end - window;
+              uint64_t h64 = 0;
+              uint32_t h32 = 0;
+              if (phash == &hash64)
+                assure ((hashcall (&h64, last, window), h64 == hash64));
+              else if (phash == &hash32)
+                assure ((hashcall (&h32, last, window), h32 == hash32));
+              else
+                affirm (false);
+            }
+
+          char const *const wrend = (hash_end && max_end)
+                                        ? MIN (hash_end, max_end)
+                                    : hash_end ? hash_end
+                                    : max_end  ? max_end
+                                               : eob;
+          ssize_t const to_write = wrend - start;
+          if (filter_ok || new_file_flag)
+            filter_ok = cwrite (new_file_flag, start, to_write);
+          start = wrend;
+          new_file_flag = (hash_end || max_end);
+          if (new_file_flag)
+            {
+              write_at_most = maxsz;
+              hash32 = 0;
+              hash64 = 0;
+              to_gulp = window;
+            }
+          else
+            {
+              write_at_most -= to_write;
+            }
+        }
+      /* BUZHash depends on this window to shift old values out, GearHash
+         needs it to feed last WINDOW bytes on overrun in *_rawfind versions
+         combined with either short read or cut point close to the beginning
+         of the buffer.  Short read might also lead to overlap happening when
+         N_READ is less than WINDOW.  */
+      memmove (buf - window, eob - window, window);
+    }
+  if (n_read < 0)
+    error (EXIT_FAILURE, errno, "%s", quotef (infile));
+  IF_LINT (free ((void *)terminator));
 }
 
 /* Split into pieces of exactly N_LINES lines.
@@ -1368,6 +1719,8 @@ strtoint_die (char const *msgid, char const *arg)
    extreme value will do the right thing anyway on any practical platform.  */
 #define OVERFLOW_OK LONGINT_OVERFLOW
 
+static char const byte_multipliers[] = "bEGKkMmPQRTYZ0";
+
 /* Parse ARG for number of bytes or lines.  The number can be followed
    by MULTIPLIERS, and the resulting value must be positive.
    If the number cannot be parsed, diagnose with MSG.
@@ -1402,17 +1755,228 @@ parse_chunk (intmax_t *k_units, intmax_t *n_units, char const *arg)
     strtoint_die (N_("invalid number of chunks"), arg);
 }
 
+/* Parse HASH[WINDOW]/AVG/MAX syntax of content-defined chunking SIZE.  */
+
+static enum Cdc_type
+parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
+{
+  enum Cdc_type hash = cdc_undef;
+  for (int i = 0; i < ARRAY_SIZE (cdc_names); ++i)
+    if (STRPREFIX (arg, cdc_names[i]))
+      {
+        arg += strlen (cdc_names[i]);
+        hash = (enum Cdc_type)i;
+        break;
+      }
+  if (hash == cdc_undef)
+    error (EXIT_FAILURE, 0, _ ("unknown rolling hash: %s"), quote (arg));
+
+  if (*arg == '[')
+    {
+      char *next = NULL;
+      arg++; /* skip '[' */
+      strtol_error e = xstrtoimax (arg, &next, 10, window, byte_multipliers);
+      if (e != LONGINT_INVALID_SUFFIX_CHAR || *next != ']')
+        strtoint_die (N_ ("cannnot parse hash window"), arg);
+
+      /* Window below hash width makes bad PRF out of BUZHash for sure.  Longer
+         window does not guarantee good PRF though.  It's possible to implement
+         GearHash over shortened window, but it makes terminator calculation
+         trickier and overall utility of reduced-window GearHash is unclear. */
+      if (cdc_isgear(hash) && *window != cdc_window_min[hash])
+        error (EXIT_FAILURE, 0, _ ("%s hash window must be %d"),
+               cdc_names[hash], cdc_window_min[hash]);
+      else if (cdc_isbuz (hash) && *window < cdc_window_min[hash])
+        error (EXIT_FAILURE, 0, _ ("%s hash window must be at least %d"),
+               cdc_names[hash], cdc_window_min[hash]);
+
+      arg = next + 1;
+    }
+  else if (*arg == '/')
+    *window = cdc_window_default[hash];
+  else
+    error (EXIT_FAILURE, 0,
+           _ ("cannot parse %s: neither hash window nor chunk size"),
+           quote (arg));
+
+  if (*arg != '/')
+    error (EXIT_FAILURE, 0, _ ("cannot parse %s as chunk size"), quote (arg));
+  arg++; /* skip '/' */
+
+  char *next = NULL;
+  strtol_error e = xstrtoimax (arg, &next, 10, avgsz, byte_multipliers);
+  if (!(e == LONGINT_OK || (e == LONGINT_INVALID_SUFFIX_CHAR && *next == '/')))
+    strtoint_die (N_ ("cannot parse average chunk size"), arg);
+
+  /* AVGSZ > WINDOW is not a hard requirement for rolling hash, but it's way
+     easier to reason about chunks having at least WINDOW bytes each.  */
+  if (*avgsz <= *window)
+    error (EXIT_FAILURE, 0,
+           _ ("average chunk (%jd) must be larger than hash window (%jd)"),
+           *avgsz, *window);
+
+  /* Let's set ~40 MiB as the largest chunk size that is supported by decision
+     function over 32-bit hash value with 1% error tolerance.  The smallest
+     value to exceed 1% err is 43821726 bytes.
+
+     Other options are to make exception for power-of-two values or to compute
+     error margin for specific AVGSZ value.  However, several discontinuous
+     ranges of accepted values are kinda confusing from UX standpoint.
+
+     High power-of-two values like 2G or 4G bring another issue to the table.
+     It's not _proven_ that BUZHash can actually produce every possible N-bit
+     hash value for every possible WINDOW given specific S-box.  So it's not
+     proven that 1 or 0 will ever be emitted as a hash value to support 2G/4G.
+     It's trivially false for small windows: e.g. 3-byte window has no way
+     to produce more than 2^24 hashes.  It's also possible (but very unlikely)
+     to generate a bit-balanced BUZHash S-box with every popcount(cdc_table[c])
+     being even.  Such S-box makes popcount(buzNN(STR)) even for _any_ STR
+     as both ROTL and XOR operations preserve parity of the popcount.  */
+  intmax_t const hash32_chunk_max = INTMAX_C (42000000);
+  if (cdc_is32 (hash) && *avgsz > hash32_chunk_max)
+    error (EXIT_FAILURE, 0, _ ("average chunk over 40MiB/42MB needs 64-bit hash"));
+
+  /* There is no explicit "signaling" value to skip MAXSZ code altogether.
+     First, 2^63 is large enough.  Second, CDC is probabilistic anyway :-P  */
+  static_assert (INT64_MAX <= INTMAX_MAX);
+  *maxsz = INTMAX_MAX;
+  if (*next == '/'
+      && xstrtoimax (next + 1, NULL, 10, maxsz, byte_multipliers)
+             != LONGINT_OK)
+    strtoint_die (N_ ("cannot parse maximum chunk size"), next + 1);
+
+  if (*maxsz <= *avgsz)
+    error (EXIT_FAILURE, 0,
+           _ ("maximum chunk (%jd) must be larger than average chunk (%jd)"),
+           *maxsz, *avgsz);
+
+  return hash;
+}
+
+static void
+cdc_table_init (enum Cdc_type hash, char const *random_source, idx_t window)
+{
+  /* Alignment is not vital for CDC lookup tables, but it saves one cache-line
+     and it might save us from confusing fall from the D-cache cliff.  */
+  idx_t const cacheline_size = getcachelinesize ();
+
+  /* The code does not support vectorised rolling hash _implementations_.
+     Naive vectorisation hits memory wall as each input byte is processed
+     through lookup table at least once.  Replacing lookup table with
+     pseudo-random function from u8 to u32|u64 is possible but it makes
+     its interface different as --random-source would use entropy differently.
+     So, potential SIMD implementation is effectively a _different_ rolling
+     hash function with different name.  And it still has to be quite fast
+     to beat SISD implementation running at 1.33 cpb :-)  */
+  if (!random_source && cdc_is64 (hash))
+    cdc_table = buz_seed;
+  else if (!random_source && cdc_is32 (hash))
+    {
+      uint32_t *t = xalignalloc (cacheline_size, N_CHARS * sizeof (*t));
+      for (idx_t i = 0; i < N_CHARS; i++)
+        t[i] = buz_seed[i];
+      cdc_table = t;
+    }
+  else if (random_source && cdc_isgear (hash))
+    {
+      /* random-source for GearHash is N_CHARS little-endian integers */
+      size_t const sizeof_hash
+          = cdc_is64 (hash) ? sizeof (uint64_t) : sizeof (uint32_t);
+      size_t const sizeof_table = N_CHARS * sizeof_hash;
+      void *t = xalignalloc (cacheline_size, sizeof_table);
+      FILE *fd = fopen (random_source, "rb");
+      if (!fd)
+        error (EXIT_FAILURE, errno, "%s", quotef (random_source));
+      size_t const n_read = fread (t, 1, sizeof_table, fd);
+      if (n_read != sizeof_table)
+        error (EXIT_FAILURE, 0, _("%s: got only %zu of %zu bytes"),
+               quotef (random_source), n_read, sizeof_table);
+      fclose (fd);
+      if (hash == cdc_gear64)
+        for (uint64_t *p = t, *const end = p + N_CHARS; p != end; p++)
+          *p = le64toh (*p);
+      else
+        for (uint32_t *p = t, *const end = p + N_CHARS; p != end; p++)
+          *p = le32toh (*p);
+      cdc_table = t;
+    }
+  else if (random_source && cdc_isbuz (hash))
+    {
+      /* random-source for BUZHash is more complex, make-buz-table.c describes
+         the reasons.  GearHash random-source reader above is constant-time and
+         it's 10 times faster than BUZHash S-box generation, but that's 0.1M
+         CPU cycles vs. 1M.  Effect of those 1M cycles of initialization is
+         quite low: it's BUZHash runtime over ~400 KiB of data.  */
+      size_t const sizeof_hash
+          = cdc_is64 (hash) ? sizeof (uint64_t) : sizeof (uint32_t);
+      size_t const hash_width = sizeof_hash * UCHAR_WIDTH;
+      /* randperm_bound() is not really a strict bound, it's just a hint.
+         Infinite stream of 0xFF bytes makes the sampling RNG loop!  */
+      size_t const seed_size
+          = randperm_bound (N_CHARS / 2, N_CHARS) * hash_width;
+      struct randint_source *r = randint_all_new (random_source, seed_size);
+      if (!r)
+        error (EXIT_FAILURE, errno, "%s", quotef (random_source));
+      size_t const sizeof_table = sizeof_hash * N_CHARS;
+      void *const t = xalignalloc (cacheline_size, sizeof_table);
+      memset (t, 0, sizeof_table);
+      for (unsigned bit = 0; bit < hash_width; bit++)
+        {
+          uint32_t *const t32 = t;
+          uint64_t *const t64 = t;
+          size_t *const perm = randperm_new (r, N_CHARS / 2, N_CHARS);
+          if (hash == cdc_buz64)
+            for (unsigned c = 0; c < N_CHARS / 2; c++)
+              t64[perm[c]] |= UINT64_C (1) << bit;
+          else
+            for (unsigned c = 0; c < N_CHARS / 2; c++)
+              t32[perm[c]] |= UINT32_C (1) << bit;
+          free (perm);
+        }
+      if (randint_all_free (r))
+        error (EXIT_FAILURE, errno, "%s", quotef (random_source));
+      cdc_table = t;
+    }
+  else
+    affirm (false);
+
+  affirm (window >= 1);
+  if ((hash == cdc_buz32 && window % 32 == 0)
+      || (hash == cdc_buz64 && window % 64 == 0))
+    unbuz_table = cdc_table;
+  else if (hash == cdc_buz32)
+    {
+      uint32_t const *const buz = cdc_table;
+      uint32_t *t = xalignalloc (cacheline_size, N_CHARS * sizeof *t);
+      for (int i = 0; i < N_CHARS; i++)
+        t[i] = rotl32 (buz[i], window % 32);
+      unbuz_table = t;
+    }
+  else if (hash == cdc_buz64)
+    {
+      uint64_t const *const buz = cdc_table;
+      uint64_t *t = xalignalloc (cacheline_size, N_CHARS * sizeof *t);
+      for (int i = 0; i < N_CHARS; i++)
+        t[i] = rotl64 (buz[i], window % 64);
+      unbuz_table = t;
+    }
+  else
+    affirm ((hash == cdc_gear32 && window == 32)
+            || (hash == cdc_gear64 && window == 64));
+}
 
 int
 main (int argc, char **argv)
 {
   enum Split_type split_type = type_undef;
+  enum Cdc_type cdc_type = cdc_undef;
   idx_t in_blk_size = 0;	/* optimal block size of input file device */
   idx_t page_size = getpagesize ();
   intmax_t k_units = 0;
+  intmax_t w_units = 0;
   intmax_t n_units = 0;
+  char const *random_source = NULL;
 
-  static char const multipliers[] = "bEGKkMmPQRTYZ0";
   int c;
   int digits_optind = 0;
   off_t file_size = OFF_T_MAX;
@@ -1462,9 +2026,20 @@ main (int argc, char **argv)
         case 'b':
           if (split_type != type_undef)
             FAIL_ONLY_ONE_WAY ();
-          split_type = type_bytes;
-          n_units = parse_n_units (optarg, multipliers,
-                                   N_("invalid number of bytes"));
+          /* skip any whitespace */
+          while (isspace (to_uchar (*optarg)))
+            optarg++;
+          if (isdigit (*optarg))
+            {
+              split_type = type_bytes;
+              n_units = parse_n_units (optarg, byte_multipliers,
+                                       N_("invalid number of bytes"));
+            }
+          else
+            {
+              split_type = type_bytes_cdc;
+              cdc_type = parse_cdc (&w_units, &n_units, &k_units, optarg);
+            }
           break;
 
         case 'l':
@@ -1478,7 +2053,7 @@ main (int argc, char **argv)
           if (split_type != type_undef)
             FAIL_ONLY_ONE_WAY ();
           split_type = type_byteslines;
-          n_units = parse_n_units (optarg, multipliers,
+          n_units = parse_n_units (optarg, byte_multipliers,
                                    N_("invalid number of lines"));
           break;
 
@@ -1597,12 +2172,18 @@ main (int argc, char **argv)
           filter_command = optarg;
           break;
 
+        case RANDOM_SOURCE_OPTION:
+          if (random_source && !streq (random_source, optarg))
+            error (EXIT_FAILURE, 0, _("multiple random sources specified"));
+          random_source = optarg;
+          break;
+
         case IO_BLKSIZE_OPTION:
-          in_blk_size = xnumtoumax (optarg, 10, 1,
-                                    MIN (SYS_BUFSIZE_MAX,
-                                         MIN (IDX_MAX, SIZE_MAX) - 1),
-                                    multipliers, _("invalid IO block size"),
-                                    0, XTOINT_MIN_RANGE);
+          in_blk_size
+              = xnumtoumax (optarg, 10, 1,
+                            MIN (SYS_BUFSIZE_MAX, MIN (IDX_MAX, SIZE_MAX) - 1),
+                            byte_multipliers, _ ("invalid IO block size"), 0,
+                            XTOINT_MIN_RANGE);
           break;
 
         case VERBOSE_OPTION:
@@ -1618,7 +2199,7 @@ main (int argc, char **argv)
         }
     }
 
-  if (k_units != 0 && filter_command)
+  if (split_type != type_bytes_cdc && k_units != 0 && filter_command)
     {
       error (0, 0, _("--filter does not process a chunk extracted to "
                      "standard output"));
@@ -1685,10 +2266,42 @@ main (int argc, char **argv)
 
   if (in_blk_size == 0)
     in_blk_size = io_blksize (&in_stat_buf);
+  /* It's not hard to support larger BUZHash window: few more memmove calls.
+     It's tricky to do that without performance degradation within the current
+     code spinning around I/O buffer of IN_BLK_SIZE bytes.  */
+  int const buz_window_max = MIN (in_blk_size, IO_BUFSIZE);
+  if (split_type == type_bytes_cdc && cdc_isbuz (cdc_type)
+      && buz_window_max < w_units)
+    error (EXIT_FAILURE, 0,
+           _ ("%s[%jd] exceeds the largest supported BUZHash window (%d)"),
+           cdc_names[cdc_type], w_units, buz_window_max);
 
-  char *buf = xalignalloc (page_size, in_blk_size + 1);
+  /* The I/O buffer is IN_BLK_SIZE bytes and is aligned to the PAGE_SIZE.
+     lines_split() uses one more byte so avoid boundary checks with rawmemchr.
+     The same idea needs W_UNITS bytes to terminate GearHash computation.  */
+  idx_t buf_size = in_blk_size;
+  if (split_type == type_digits || split_type == type_lines)
+    buf_size += 1;
+  else if (split_type == type_bytes_cdc && cdc_isgear (cdc_type))
+    buf_size += w_units;
+
+  /* BUZHash needs prepended WINDOW for computation, GearHash needs it
+     for backtracking on short read.  */
+  idx_t prepend = 0;
+  if (split_type == type_bytes_cdc)
+    if (ckd_add (&prepend, 1, (w_units - 1) | (page_size - 1)))
+      xalloc_die ();
+  if (ckd_add (&buf_size, buf_size, prepend))
+    xalloc_die ();
+
+  char *buf = xalignalloc (page_size, buf_size);
+  /* memset() is here to suppress warning about reading uninitialized memory
+     with memmove() in case of short read.  The uninitialized value is not used
+     in computation as it's still hash gulping stage of bytes_cdc_split.  */
+  memset (buf, 0, prepend);
+  buf += prepend;
+
   ssize_t initial_read = -1;
-
   if (split_type == type_chunk_bytes || split_type == type_chunk_lines)
     {
       file_size = input_file_size (STDIN_FILENO, &in_stat_buf,
@@ -1698,6 +2311,8 @@ main (int argc, char **argv)
                quotef (infile));
       initial_read = MIN (file_size, in_blk_size);
     }
+  else if (split_type == type_bytes_cdc)
+    cdc_table_init (cdc_type, random_source, w_units);
 
   /* When filtering, closure of one pipe must not terminate the process,
      as there may still be other streams expecting input from us.  */
@@ -1713,6 +2328,10 @@ main (int argc, char **argv)
 
     case type_bytes:
       bytes_split (n_units, 0, buf, in_blk_size, -1, 0);
+      break;
+
+    case type_bytes_cdc:
+      bytes_cdc_split (cdc_type, n_units, k_units, w_units, buf, in_blk_size);
       break;
 
     case type_byteslines:
