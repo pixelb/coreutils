@@ -29,6 +29,10 @@
 #include <spawn.h>
 #include <endian.h>
 
+#ifdef USE_JCCERR_CDC
+# include <cpuid.h>
+#endif
+
 #include "system.h"
 #include "alignalloc.h"
 #include "assure.h"
@@ -111,6 +115,8 @@ static int output_desc = -1;
    output file is opened. */
 static bool verbose;
 
+static bool debug;
+
 /* If true, don't generate zero length output files. */
 static bool elide_empty_files;
 
@@ -156,6 +162,11 @@ static char const *cdc_names[] = { "buz32", "buz64", "gear32", "gear64" };
 static cdchash_fn const cdc_hash[] = { buz32, buz64, gear32, gear64 };
 static cdcfind_fn const cdc_find[]
     = { buz32_find, buz64_find, gear32_rawfind, gear64_rawfind };
+#ifdef USE_JCCERR_CDC
+static cdcfind_fn const cdc_find_jccerr[]
+    = { buz32_find_jccerr, buz64_find_jccerr, gear32_rawfind_jccerr,
+        gear64_rawfind_jccerr };
+#endif
 /* BUZHash default follows default value used by BorgBackup.  */
 static int const cdc_window_default[] = { 4095, 4095, 32, 64 };
 static int const cdc_window_min[] = { 4, 8, 32, 64 };
@@ -184,6 +195,75 @@ cdc_is32 (enum Cdc_type hash)
   return hash == cdc_gear32 || hash == cdc_buz32;
 }
 
+#ifdef USE_JCCERR_CDC
+static bool
+is_genuine_intel (void)
+{
+  unsigned int eax, ebx, ecx, edx;
+  return __get_cpuid (0, &eax, &ebx, &ecx, &edx) && ebx == signature_INTEL_ebx
+         && edx == signature_INTEL_edx && ecx == signature_INTEL_ecx;
+}
+
+static bool
+is_intel_jcc_erratum_affected (void)
+{
+  if (!is_genuine_intel ())
+    return false;
+
+  unsigned int eax, ebx, ecx, edx;
+  if (!__get_cpuid (1, &eax, &ebx, &ecx, &edx))
+    return false; /* too ancient */
+
+  unsigned int const family = (eax >> 8) & 0x0Fu;
+  if (family != 6)
+    return false; /* Extended Family ID doesn't matter, only =6 is affected */
+
+  unsigned int const model = (eax >> 4) & 0x0Fu;
+  unsigned int const extended_model = (eax >> 16) & 0x0Fu;
+  unsigned int const actual_model
+      = (assure (family == 6), model + (extended_model << 4));
+  unsigned int const stepping = eax & 0x0Fu;
+  unsigned int const processor = (actual_model << 4) + stepping;
+  /* Affected processors as published by Intel in BCP #660236.
+     Affected microarchitectures are Skylake, Kaby Lake, Amber Lake,
+     Whiskey Lake, Coffee Lake, Cascade Lake, Comet Lake.  */
+  switch (processor)
+    {
+    case 0x4E3:
+    case 0x554:
+    case 0x557:
+    case 0x5E3:
+    case 0x8E9:
+    case 0x8EA:
+    case 0x8EB:
+    case 0x8EC:
+    case 0x9E9:
+    case 0x9EA:
+    case 0x9EB:
+    case 0x9ED:
+    case 0xA60:
+    case 0xAEA:
+      return true;
+    }
+  return false;
+}
+#endif
+
+static cdcfind_fn const *
+get_cdc_find (void)
+{
+#ifdef USE_JCCERR_CDC
+  const bool affected = is_intel_jcc_erratum_affected ();
+  if (debug)
+    error (0, 0,
+           (affected ? _("using Intel Jcc erratum mitigation")
+                     : _("not affected by Intel Jcc erratum")));
+  return affected ? cdc_find_jccerr : cdc_find;
+#else
+  return cdc_find;
+#endif
+}
+
 /* TODO: should getcachelinesize() be moved next to getpagesize() ?  */
 static idx_t
 getcachelinesize (void)
@@ -206,7 +286,8 @@ enum
   FILTER_OPTION,
   IO_BLKSIZE_OPTION,
   ADDITIONAL_SUFFIX_OPTION,
-  RANDOM_SOURCE_OPTION
+  RANDOM_SOURCE_OPTION,
+  DEBUG_PROGRAM_OPTION
 };
 
 static struct option const longopts[] =
@@ -226,6 +307,7 @@ static struct option const longopts[] =
   {"random-source", required_argument, NULL,
    RANDOM_SOURCE_OPTION},
   {"verbose", no_argument, NULL, VERBOSE_OPTION},
+  {"debug", no_argument, NULL, DEBUG_PROGRAM_OPTION},
   {"separator", required_argument, NULL, 't'},
   {"-io-blksize", required_argument, NULL,
    IO_BLKSIZE_OPTION}, /* do not document */
@@ -379,6 +461,10 @@ default size is 1000 lines, and default PREFIX is 'x'.\n\
       oputs (_("\
       --verbose\n\
          print a diagnostic just before each output file is opened\n\
+"));
+      oputs (_("\
+      --debug\n\
+         indicate what CDC implementation is used\n\
 "));
       oputs (HELP_OPTION_DESCRIPTION);
       oputs (VERSION_OPTION_DESCRIPTION);
@@ -1036,7 +1122,7 @@ bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
         : (hash == cdc_gear64) ? gear64_terminator_alloc ()
                                : NULL;
   cdchash_fn const hashcall = cdc_hash[hash];
-  cdcfind_fn const findcall = cdc_find[hash];
+  cdcfind_fn const findcall = get_cdc_find ()[hash];
 
   bool new_file_flag = true;
   bool filter_ok = true;
@@ -2188,6 +2274,10 @@ main (int argc, char **argv)
 
         case VERBOSE_OPTION:
           verbose = true;
+          break;
+
+        case DEBUG_PROGRAM_OPTION:
+          debug = true;
           break;
 
         case_GETOPT_HELP_CHAR;

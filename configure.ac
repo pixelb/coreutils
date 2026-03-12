@@ -288,6 +288,57 @@ if test $gl_gcc_warnings != no; then
   AC_SUBST([GNULIB_TEST_WARN_CFLAGS])
 fi
 
+# split_cdc.c demands Intel Jcc erratum fixes on x86_64 as it _might(!)_
+# get 40% performance penalty otherwise... depending on final code layout!
+# The loops are very tight there and degradation from DSB to MITE instruction
+# decoder feels very real on Skylake. One can benchmark the issue on Linux
+# with perf(1), however the issue likely affects other OSes on x86_64 CPUs:
+#   $ perf stat -e task-clock,cycles,instructions,idq.mite_uops,idq.dsb_uops \
+#       split ...
+# See https://www.intel.com/content/www/us/en/content-details/841076/intel-mitigations-for-jump-conditional-code-erratum.html
+# and https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/mitigation-strategies-jcc-microcode.html
+#
+# The "lucky" code layout might be possible without Jcc-workaround CFLAGS,
+# that makes A/B benchmarking a bit less trivial.
+#
+# Some compilers may produce -O2 code with performance regressions depending
+# on code layout & CPU running it.  That's workaround from coreutils side.
+# Number of hosts affected by Jcc-erratum is estimated as ~23% on March 2026
+# via Firefox Public Data Report on hardware: ~22% of machines with ~95% being
+# x86.  That might be enough to justify Jcc workaround being bundled by default
+# for a few more years.
+#
+# Runtime dispatch is more future-proof in terms of maintenance: extra 512
+# bytes of .text are cheaper than making a decision if the specific build
+# should use Jcc erratum workaround or not.  So, both versions of hot functions
+# are compiled.  One of reasons to follow this path is Jcc-workaround degrading
+# performance for Clang-compiled code running on Xeon Platinum 8592+.
+# It proves that Jcc-workaround is not always "free".
+if test "$host_cpu" = x86_64; then
+  # x86_64 is the only affected & somewhat carefully benchmarked platform.
+  gl_GCC_VERSION_IFELSE([11], [0], [gcc_ge11=1])
+  gl_GCC_VERSION_IFELSE([14], [0], [:], [gcc_lt14=1])
+  if test -n "$gcc_ge11" -a -n "$gcc_lt14"; then
+    gl_COMPILER_OPTION_IF([-falign-loops=32],
+      [CDC_CFLAGS='-falign-loops=32'])
+  fi
+  if test "$gl_cv_compiler_clang" = yes; then
+    gl_COMPILER_OPTION_IF([-mbranches-within-32B-boundaries],
+      [JCCERR_CFLAGS='-mbranches-within-32B-boundaries'])
+  else
+    # assuming gcc
+    gl_COMPILER_OPTION_IF([[-Wa,-mbranches-within-32B-boundaries]],
+      [[JCCERR_CFLAGS='-Wa,-mbranches-within-32B-boundaries']])
+  fi
+fi
+if test -n "$JCCERR_CFLAGS"; then
+  AC_DEFINE([USE_JCCERR_CDC], [1],
+            [CDC code with Intel Jcc erratum workaround enabled])
+fi
+AM_CONDITIONAL([USE_JCCERR_CDC], [test -n "$JCCERR_CFLAGS"])
+AC_SUBST([CDC_CFLAGS])
+AC_SUBST([JCCERR_CFLAGS])
+
 AC_FUNC_FORK
 
 optional_bin_progs=

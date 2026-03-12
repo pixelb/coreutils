@@ -60,6 +60,23 @@ unsigned char const *buz64_find (void *phash, void const *ple,
                                  unsigned char const *p,
                                  unsigned char const *const end, idx_t window);
 
+unsigned char const *gear32_rawfind_jccerr (void *phash, void const *ple,
+                                            unsigned char const *p,
+                                            unsigned char const *const end,
+                                            idx_t window);
+unsigned char const *gear64_rawfind_jccerr (void *phash, void const *ple,
+                                            unsigned char const *p,
+                                            unsigned char const *const end,
+                                            idx_t window);
+unsigned char const *buz32_find_jccerr (void *phash, void const *ple,
+                                        unsigned char const *p,
+                                        unsigned char const *const end,
+                                        idx_t window);
+unsigned char const *buz64_find_jccerr (void *phash, void const *ple,
+                                        unsigned char const *p,
+                                        unsigned char const *const end,
+                                        idx_t window);
+
 static inline uint32_t
 rotl32 (uint32_t x, unsigned int n)
 {

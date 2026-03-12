@@ -1,0 +1,56 @@
+#!/bin/sh
+
+test -s gpuModel.json || \
+  wget -O gpuModel.json https://data.firefox.com/datasets/desktop/hardware/default/gpuModel/index.json
+
+# 06_4E 	3 	6th Generation Intel® Core™ Processor Family based on microarchitecture code name Skylake U23e
+# 06_4E 	3 	6th Generation Intel® Core™ Processors based on microarchitecture code name Skylake U
+# 06_4E 	3 	6th Generation Intel® Core™ Processors based on microarchitecture code name Skylake Y
+# 06_5E 	3 	6th Generation Intel® Core™ Processor Family based on microarchitecture code name Skylake H
+# 06_5E 	3 	6th Generation Intel® Core™ Processor Family based on microarchitecture code name Skylake S
+# 06_55H 	4 	Intel® Core™ X-series Processors based on microarchitecture code name Skylake X
+# 06_55H 	4 	Intel® Xeon® Scalable Processors based on microarchitecture code name Skylake Server
+# 06_55H 	4 	Intel® Xeon® Processor D Family based on microarchitecture code name Skylake D, Bakerville
+# 06_55H 	4 	Intel® Xeon® Processor W Family based on microarchitecture code name Skylake W
+# 06_55H 	4 	Intel® Xeon® Processor E3 v5 Family based on microarchitecture code name Skylake Xeon E3
+#
+# 06_8EH 	9 	7th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake U
+# 06_8EH 	9 	7th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake U23e
+# 06_8EH 	9 	7th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake Y
+# 06_9EH 	9 	7th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake H
+# 06_9EH 	9 	7th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake S
+# 06_9EH 	9 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake G
+# 06_AEH 	A 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Kaby Lake Refresh U (4+2)
+# 06_9EH 	9 	Intel® Core™ X-series Processors based on microarchitecture code name Kaby Lake X
+# 06_9EH 	9 	Intel® Xeon® Processor E3 v6 Family Kaby Lake Xeon E3
+#
+# 06_8EH 	9 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Amber Lake Y
+# 06_8EH 	C 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Amber Lake Y
+#
+# 06_8EH 	B 	8th Generation Intel® Core™ Processors based on microarchitecture code name Whiskey Lake U
+# 06_8EH 	C 	8th Generation Intel® Core™ Processors based on microarchitecture code name Whiskey Lake U
+#
+# 06_55 	7 	2nd Generation Intel® Xeon® Scalable Processors based on microarchitecture code name Cascade Lake (server)
+#
+# 06_8EH 	A 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake U43e
+# 06_9EH 	A 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake H
+# 06_9EH 	A 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake S
+# 06_9EH 	A 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake S (6+2) x/KBP
+# 06_9EH 	B 	8th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake S (4+2)
+# 06_9EH 	B 	Intel® Celeron® Processor G Series based on microarchitecture code name Coffee Lake S (4+2)
+# 06_9EH 	A 	Intel® Xeon® Processor E Family based on microarchitecture code name Coffee Lake S (6+2)3
+# 06_9EH 	A 	Intel® Xeon® Processor E Family based on microarchitecture code name Coffee Lake S (4+2)3
+#
+# 06_9EH 	D 	9th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake H (8+2)
+# 06_9EH 	D 	9th Generation Intel® Core™ Processor Family based on microarchitecture code name Coffee Lake S (8+2)
+#
+# 06_8EH 	C 	10th Generation Intel® Core™ Processor Family based on microarchitecture code name Comet Lake U42
+# 06_A6H 	0 	10th Generation Intel® Core™ Processor Family based on microarchitecture code name Comet Lake U62
+#
+# ^^ joined with $(jq -r '.data.populations | keys' gpuModel.json)
+# becomes --> [ "Skylake (GT2)", "Kaby Lake (GT1.5)", "Kaby Lake (GT2)", "Coffee Lake (GT2)" ]
+
+latest=$(jq -r '.data.populations[][].x' gpuModel.json | sort | tail -1)
+jq --arg latest "$latest" \
+  '.data.populations[ "Skylake (GT2)", "Kaby Lake (GT1.5)", "Kaby Lake (GT2)", "Coffee Lake (GT2)" ][] | select(.x == $latest) | .y' \
+  gpuModel.json | awk '{ a += $1 } END { print a }'

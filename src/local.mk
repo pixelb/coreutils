@@ -427,7 +427,18 @@ src_arch_SOURCES = src/uname.c src/uname-arch.c
 src_cut_SOURCES = src/cut.c src/set-fields.c
 src_numfmt_SOURCES = src/numfmt.c src/set-fields.c
 
-src_split_SOURCES = src/split.c src/temp-stream.c src/buz-seed.c src/split_cdc.c
+src_split_SOURCES = src/split.c src/temp-stream.c src/buz-seed.c
+src_split_LDADD += src/libsplit_cdc.a
+noinst_LIBRARIES += src/libsplit_cdc.a
+src_libsplit_cdc_a_SOURCES = src/split_cdc.c
+src_libsplit_cdc_a_CFLAGS = $(CDC_CFLAGS) $(AM_CFLAGS)
+if USE_JCCERR_CDC
+src_split_LDADD += src/libsplit_jccerr.a
+noinst_LIBRARIES += src/libsplit_jccerr.a
+src_libsplit_jccerr_a_SOURCES = src/split_cdc.c
+src_libsplit_jccerr_a_CFLAGS = -DJCCERR_CDC $(JCCERR_CFLAGS) $(CDC_CFLAGS) $(AM_CFLAGS)
+endif
+
 src_tac_SOURCES = src/tac.c src/temp-stream.c
 
 src_tail_SOURCES = src/tail.c src/iopoll.c
