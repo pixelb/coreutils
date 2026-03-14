@@ -547,7 +547,7 @@ copy_file_data (int ifd, struct stat const *ist, off_t ipos, char const *iname,
   idx_t buf_size = io_blksize (ost);
 
   /* Deal with sparse files.  */
-  struct scan_inference scan_inference;
+  struct scan_inference scan_inference; /* GCC 11.4 warns on uninitialized */
   enum scantype scantype = infer_scantype (ifd, ist, ipos, &scan_inference);
   if (scantype == ERROR_SCANTYPE)
     {
