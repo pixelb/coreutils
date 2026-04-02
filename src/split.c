@@ -148,7 +148,7 @@ static bool const TEST =
 enum Split_type
 {
   type_undef, type_bytes, type_byteslines, type_lines, type_digits,
-  type_bytes_cdc,
+  type_bytes_cdc, type_byteslines_cdc,
   type_chunk_bytes, type_chunk_lines, type_rr
 };
 
@@ -170,6 +170,12 @@ static cdcfind_fn const cdc_find_jccerr[]
 /* BUZHash default follows default value used by BorgBackup.  */
 static int const cdc_window_default[] = { 4095, 4095, 32, 64 };
 static int const cdc_window_min[] = { 4, 8, 32, 64 };
+
+static bool
+iscdc(enum Split_type type)
+{
+  return type == type_bytes_cdc || type == type_byteslines_cdc;
+}
 
 static bool
 cdc_isbuz (enum Cdc_type hash)
@@ -1083,7 +1089,7 @@ gear64_terminator_alloc (void)
 static void
 bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
                  intmax_t const maxsz, idx_t const window, char *const buf,
-                 idx_t const iosz)
+                 idx_t const iosz, bool const do_lines)
 {
   static_assert (UINT64_MAX <= UINTMAX_MAX);
   affirm (1 <= window && window <= avgsz && avgsz < maxsz && window <= iosz);
@@ -1128,6 +1134,7 @@ bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
   bool filter_ok = true;
   intmax_t write_at_most = maxsz;
   idx_t to_gulp = window;
+  bool search_hash = true;
   ssize_t n_read;
 
   while ((n_read = read (STDIN_FILENO, buf, iosz)) > 0)
@@ -1152,37 +1159,50 @@ bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
           char const *hash_end = NULL;
           char const *unread = start;
 
-          if (to_gulp)
+          if (search_hash)
             {
-              idx_t const gulpable = MIN (startsz, to_gulp);
-              hashcall (phash, (cuchar_t*)start, gulpable);
-              to_gulp -= gulpable;
-              unread += gulpable;
-              if (!to_gulp && (hash32 <= le32 && hash64 <= le64))
-                hash_end = unread;
+              if (to_gulp)
+                {
+                  idx_t const gulpable = MIN (startsz, to_gulp);
+                  hashcall (phash, (cuchar_t*)start, gulpable);
+                  to_gulp -= gulpable;
+                  unread += gulpable;
+                  if (!to_gulp && (hash32 <= le32 && hash64 <= le64))
+                    hash_end = unread;
+                }
+
+              if (!hash_end && unread != eob)
+                {
+                  char const *const le_at = (char const *)findcall (
+                      phash, ple, (cuchar_t *)unread, (cuchar_t *)eob, window);
+                  if (le_at < eob)
+                    {
+                      unread = le_at;  /* unread var is used iff (do_lines) */
+                      hash_end = le_at + 1;
+                    }
+                }
+
+              if (TEST && hash_end)
+                {
+                  void const *const last = hash_end - window;
+                  uint64_t h64 = 0;
+                  uint32_t h32 = 0;
+                  if (phash == &hash64)
+                    assure ((hashcall (&h64, last, window), h64 == hash64));
+                  else if (phash == &hash32)
+                    assure ((hashcall (&h32, last, window), h32 == hash32));
+                  else
+                    affirm (false);
+                }
+
+              if (do_lines && hash_end)
+                search_hash = false;
             }
 
-          if (!hash_end && unread != eob)
+          if (!search_hash)
             {
-              char const *const le_at = (char const *)findcall (
-                  phash, ple, (cuchar_t *)unread, (cuchar_t *)eob, window);
-              if (le_at < eob)
-                unread = hash_end = (le_at + 1);
-              else
-                unread = eob;
-            }
-
-          if (TEST && hash_end)
-            {
-              void const *const last = hash_end - window;
-              uint64_t h64 = 0;
-              uint32_t h32 = 0;
-              if (phash == &hash64)
-                assure ((hashcall (&h64, last, window), h64 == hash64));
-              else if (phash == &hash32)
-                assure ((hashcall (&h32, last, window), h32 == hash32));
-              else
-                affirm (false);
+              char const *const eol = memchr (unread, eolchar, eob - unread);
+              hash_end = eol ? eol + 1 : NULL;
             }
 
           char const *const wrend = (hash_end && max_end)
@@ -1201,6 +1221,7 @@ bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
               hash32 = 0;
               hash64 = 0;
               to_gulp = window;
+              search_hash = true;
             }
           else
             {
@@ -2138,9 +2159,20 @@ main (int argc, char **argv)
         case 'C':
           if (split_type != type_undef)
             FAIL_ONLY_ONE_WAY ();
-          split_type = type_byteslines;
-          n_units = parse_n_units (optarg, byte_multipliers,
-                                   N_("invalid number of lines"));
+          /* skip any whitespace */
+          while (isspace (to_uchar (*optarg)))
+            optarg++;
+          if (isdigit (*optarg))
+            {
+              split_type = type_byteslines;
+              n_units = parse_n_units (optarg, byte_multipliers,
+                                       N_("invalid number of lines"));
+            }
+          else
+            {
+              split_type = type_byteslines_cdc;
+              cdc_type = parse_cdc (&w_units, &n_units, &k_units, optarg);
+            }
           break;
 
         case 'n':
@@ -2289,7 +2321,7 @@ main (int argc, char **argv)
         }
     }
 
-  if (split_type != type_bytes_cdc && k_units != 0 && filter_command)
+  if (!iscdc (split_type) && k_units != 0 && filter_command)
     {
       error (0, 0, _("--filter does not process a chunk extracted to "
                      "standard output"));
@@ -2360,8 +2392,7 @@ main (int argc, char **argv)
      It's tricky to do that without performance degradation within the current
      code spinning around I/O buffer of IN_BLK_SIZE bytes.  */
   int const buz_window_max = MIN (in_blk_size, IO_BUFSIZE);
-  if (split_type == type_bytes_cdc && cdc_isbuz (cdc_type)
-      && buz_window_max < w_units)
+  if (iscdc (split_type) && cdc_isbuz (cdc_type) && buz_window_max < w_units)
     error (EXIT_FAILURE, 0,
            _ ("%s[%jd] exceeds the largest supported BUZHash window (%d)"),
            cdc_names[cdc_type], w_units, buz_window_max);
@@ -2372,13 +2403,13 @@ main (int argc, char **argv)
   idx_t buf_size = in_blk_size;
   if (split_type == type_digits || split_type == type_lines)
     buf_size += 1;
-  else if (split_type == type_bytes_cdc && cdc_isgear (cdc_type))
+  else if (iscdc (split_type) && cdc_isgear (cdc_type))
     buf_size += w_units;
 
   /* BUZHash needs prepended WINDOW for computation, GearHash needs it
      for backtracking on short read.  */
   idx_t prepend = 0;
-  if (split_type == type_bytes_cdc)
+  if (iscdc (split_type))
     if (ckd_add (&prepend, 1, (w_units - 1) | (page_size - 1)))
       xalloc_die ();
   if (ckd_add (&buf_size, buf_size, prepend))
@@ -2401,7 +2432,7 @@ main (int argc, char **argv)
                quotef (infile));
       initial_read = MIN (file_size, in_blk_size);
     }
-  else if (split_type == type_bytes_cdc)
+  else if (iscdc (split_type))
     cdc_table_init (cdc_type, random_source, w_units);
 
   /* When filtering, closure of one pipe must not terminate the process,
@@ -2421,7 +2452,9 @@ main (int argc, char **argv)
       break;
 
     case type_bytes_cdc:
-      bytes_cdc_split (cdc_type, n_units, k_units, w_units, buf, in_blk_size);
+    case type_byteslines_cdc:
+      bytes_cdc_split (cdc_type, n_units, k_units, w_units, buf, in_blk_size,
+                       split_type == type_byteslines_cdc);
       break;
 
     case type_byteslines:
