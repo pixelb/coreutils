@@ -3524,6 +3524,31 @@ $ seq 100 > k; split -nl/7/33 k
 22
 @end example
 
+CDC is commonly used as part of a larger data storage system. One use of CDC is
+chunk de-duplication when storing multiple revisions of a large file.  Chunks
+that are identical across revisions are stored only once.  Such chunks are
+typically identified by a Content Identifier (CID), usually computed by the
+storage system as a hash of the chunk contents.
+
+Some systems, including Git, also employ delta compression in addition
+to de-duplication.  Git uses file names to group similar objects for delta
+compression (see the Git @samp{pack-heuristic} documentation for details).
+In workloads with many similar file revisions, preserving chunk names across
+modifications and changing number of chunks may greatly improve
+the effectiveness of delta compression and reduce size of Git repository.
+
+Content-defined chunk renaming (CDCmv) is not implemented by @command{split}
+and is not part of GNU Coreutils. One possible implementation is a script
+deriving chunk names from a hash of the final @var{w} bytes of each chunk.
+
+With CDCmv, @option{--bytes} provides a slightly higher probability
+of preserving chunk names than @option{--line-bytes}, because
+@option{--line-bytes} extends chunks to include the remainder of the line
+following the window of @var{w} bytes matching the target @var{hash} value.
+CDCmv names of the chunks produced by either @option{--bytes} or
+@option{--line-bytes} can also be affected when the maximum chunk size
+of @var{k} bytes is reached.
+
 
 @node csplit invocation
 @section @command{csplit}: Split a file into context-determined pieces
