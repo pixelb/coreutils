@@ -1018,7 +1018,7 @@ gear64 (void *phash_, unsigned char const *p, idx_t count)
   *phash = hash;
 }
 
-static char const*
+static char *
 gear32_terminator_alloc (void)
 {
   uint32_t const *const cdc = cdc_table;
@@ -1050,7 +1050,7 @@ gear32_terminator_alloc (void)
   return t;
 }
 
-static char const*
+static char *
 gear64_terminator_alloc (void)
 {
   uint64_t const *const cdc = cdc_table;
@@ -1123,7 +1123,7 @@ bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
      socket behave differently.  E.g. pipe has 64 KiB capacity limit on Linux
      and socket buffer is scaled dynamically.  */
   ssize_t terminator_at = 0;
-  char const *const terminator
+  char *const terminator
       = (hash == cdc_gear32)   ? gear32_terminator_alloc ()
         : (hash == cdc_gear64) ? gear64_terminator_alloc ()
                                : NULL;
@@ -1237,7 +1237,7 @@ bytes_cdc_split (enum Cdc_type const hash, intmax_t const avgsz,
     }
   if (n_read < 0)
     error (EXIT_FAILURE, errno, "%s", quotef (infile));
-  IF_LINT (free ((void *)terminator));
+  IF_LINT (free (terminator));
 }
 
 /* Split into pieces of exactly N_LINES lines.

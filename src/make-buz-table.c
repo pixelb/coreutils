@@ -49,7 +49,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <error.h>
 #include <limits.h>
 
 enum { N_CHARS = UCHAR_MAX + 1 };
@@ -121,7 +120,10 @@ main (int argc, char **argv)
   puts ("};");
 
   if (ferror (stdout) || fclose (stdout))
-    error (EXIT_FAILURE, errno, "write error");
+    {
+      fprintf (stderr, "write error: %s\n", strerror (errno));
+      return EXIT_FAILURE;
+    }
 
   return EXIT_SUCCESS;
 }
