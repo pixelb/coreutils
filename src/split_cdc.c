@@ -70,16 +70,14 @@
    gets -25% instructions and -46% branches, but +16% cycles and +16%
    cycle_activity.cycles_mem_any.  */
 
-#ifdef JCCERR_CDC
-# define buz32_find     buz32_find_jccerr
-# define buz64_find     buz64_find_jccerr
-# define gear32_rawfind gear32_rawfind_jccerr
-# define gear64_rawfind gear64_rawfind_jccerr
-#endif
-
 extern unsigned char const *
-buz32_find (void *phash_, void const *ple_, unsigned char const *p,
-            unsigned char const *const end, idx_t window)
+#ifdef JCCERR_CDC
+buz32_find_jccerr
+#else
+buz32_find
+#endif
+(void *phash_, void const *ple_, unsigned char const *p,
+ unsigned char const *const end, idx_t window)
 {
   /* It's possible to optimize UNBUZ access on i386 placing it at (BUZ + 256).
      That saves one register spill out of two in this loop with offsetted LEA.
@@ -103,8 +101,13 @@ buz32_find (void *phash_, void const *ple_, unsigned char const *p,
 }
 
 extern unsigned char const *
-buz64_find (void *phash_, void const *ple_, unsigned char const *p,
-            unsigned char const *const end, idx_t window)
+#ifdef JCCERR_CDC
+buz64_find_jccerr
+#else
+buz64_find
+#endif
+(void *phash_, void const *ple_, unsigned char const *p,
+ unsigned char const *const end, idx_t window)
 {
   uint64_t *const phash = phash_;
   uint64_t const *const ple = ple_;
@@ -124,8 +127,13 @@ buz64_find (void *phash_, void const *ple_, unsigned char const *p,
 }
 
 extern unsigned char const *
-gear32_rawfind (void *phash_, void const *ple_, unsigned char const *p,
-                unsigned char const *const end, idx_t)
+#ifdef JCCERR_CDC
+gear32_rawfind_jccerr
+#else
+gear32_rawfind
+#endif
+(void *phash_, void const *ple_, unsigned char const *p,
+ unsigned char const *const end, idx_t)
 {
   uint32_t *const phash = phash_;
   uint32_t const *const ple = ple_;
@@ -164,8 +172,13 @@ gear32_rawfind (void *phash_, void const *ple_, unsigned char const *p,
 
    Performance gain for gear32_rawfind() is similar on these CPUs.  */
 extern unsigned char const *
-gear64_rawfind (void *phash_, void const *ple_, unsigned char const *p,
-                unsigned char const *const end, idx_t)
+#ifdef JCCERR_CDC
+gear64_rawfind_jccerr
+#else
+gear64_rawfind
+#endif
+(void *phash_, void const *ple_, unsigned char const *p,
+ unsigned char const *const end, idx_t)
 {
   uint64_t *const phash = phash_;
   uint64_t const *const ple = ple_;

@@ -35,49 +35,29 @@ extern void const *unbuz_table;
 # ifndef BUZTAB
 
 /* HASH and LE values are passed via pointers due to u32|u64 difference.  */
+#  define CDC_FIND_PARAMS \
+  void *phash, void const *ple, unsigned char const *p, \
+  unsigned char const *const end, idx_t window
+
 typedef void (*cdchash_fn) (void *phash, unsigned char const *p, idx_t count);
-typedef unsigned char const *(*cdcfind_fn) (void *phash, void const *ple,
-                                            unsigned char const *p,
-                                            unsigned char const *const end,
-                                            idx_t window);
+typedef unsigned char const *(*cdcfind_fn) (CDC_FIND_PARAMS);
 
+extern void buz32 (void *phash, unsigned char const *p, idx_t count);
+extern void buz64 (void *phash, unsigned char const *p, idx_t count);
+extern void gear32 (void *phash, unsigned char const *p, idx_t count);
+extern void gear64 (void *phash, unsigned char const *p, idx_t count);
 
-void buz32 (void *phash, unsigned char const *p, idx_t count);
-void buz64 (void *phash, unsigned char const *p, idx_t count);
-void gear32 (void *phash, unsigned char const *p, idx_t count);
-void gear64 (void *phash, unsigned char const *p, idx_t count);
+extern unsigned char const *gear32_rawfind (CDC_FIND_PARAMS);
+extern unsigned char const *gear64_rawfind (CDC_FIND_PARAMS);
+extern unsigned char const *buz32_find (CDC_FIND_PARAMS);
+extern unsigned char const *buz64_find (CDC_FIND_PARAMS);
 
-unsigned char const *gear32_rawfind (void *phash, void const *ple,
-                                     unsigned char const *p,
-                                     unsigned char const *const end,
-                                     idx_t window);
-unsigned char const *gear64_rawfind (void *phash, void const *ple,
-                                     unsigned char const *p,
-                                     unsigned char const *const end,
-                                     idx_t window);
-unsigned char const *buz32_find (void *phash, void const *ple,
-                                 unsigned char const *p,
-                                 unsigned char const *const end, idx_t window);
-unsigned char const *buz64_find (void *phash, void const *ple,
-                                 unsigned char const *p,
-                                 unsigned char const *const end, idx_t window);
+extern unsigned char const *gear32_rawfind_jccerr (CDC_FIND_PARAMS);
+extern unsigned char const *gear64_rawfind_jccerr (CDC_FIND_PARAMS);
+extern unsigned char const *buz32_find_jccerr (CDC_FIND_PARAMS);
+extern unsigned char const *buz64_find_jccerr (CDC_FIND_PARAMS);
 
-unsigned char const *gear32_rawfind_jccerr (void *phash, void const *ple,
-                                            unsigned char const *p,
-                                            unsigned char const *const end,
-                                            idx_t window);
-unsigned char const *gear64_rawfind_jccerr (void *phash, void const *ple,
-                                            unsigned char const *p,
-                                            unsigned char const *const end,
-                                            idx_t window);
-unsigned char const *buz32_find_jccerr (void *phash, void const *ple,
-                                        unsigned char const *p,
-                                        unsigned char const *const end,
-                                        idx_t window);
-unsigned char const *buz64_find_jccerr (void *phash, void const *ple,
-                                        unsigned char const *p,
-                                        unsigned char const *const end,
-                                        idx_t window);
+#  undef CDC_FIND_PARAMS
 
 static inline uint32_t
 rotl32 (uint32_t x, unsigned int n)
