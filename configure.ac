@@ -321,7 +321,7 @@ if test "$host_cpu" = x86_64; then
   # x86_64 is the only affected & somewhat carefully benchmarked platform.
   gl_GCC_VERSION_IFELSE([11], [0], [gcc_ge11=1])
   gl_GCC_VERSION_IFELSE([14], [0], [:], [gcc_lt14=1])
-  if test -n "$gcc_ge11" -a -n "$gcc_lt14"; then
+  if test -n "$gcc_ge11" && test -n "$gcc_lt14"; then
     gl_COMPILER_OPTION_IF([-falign-loops=32],
       [CDC_CFLAGS='-falign-loops=32'])
   fi
