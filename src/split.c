@@ -1884,7 +1884,7 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
       arg++; /* skip '[' */
       strtol_error e = xstrtoimax (arg, &next, 10, window, byte_multipliers);
       if (e != LONGINT_INVALID_SUFFIX_CHAR || *next != ']')
-        strtoint_die (N_ ("cannnot parse hash window"), arg);
+        strtoint_die (N_ ("cannot parse hash window"), arg);
 
       /* Window below hash width makes bad PRF out of BUZHash for sure.  Longer
          window does not guarantee good PRF though.  It's possible to implement
