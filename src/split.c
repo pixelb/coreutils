@@ -1941,7 +1941,8 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
      as both ROTL and XOR operations preserve parity of the popcount.  */
   intmax_t const hash32_chunk_max = INTMAX_C (42000000);
   if (cdc_is32 (hash) && *avgsz > hash32_chunk_max)
-    error (EXIT_FAILURE, 0, _ ("average chunk over 40MiB/42MB needs 64-bit hash"));
+    error (EXIT_FAILURE, 0,
+           _ ("average chunk over 40MiB/42MB needs 64-bit hash"));
 
   /* There is no explicit "signaling" value to skip MAXSZ code altogether.
      First, 2^63 is large enough.  Second, CDC is probabilistic anyway :-P  */

@@ -295,8 +295,11 @@ fi
 # with perf(1), however the issue likely affects other OSes on x86_64 CPUs:
 #   $ perf stat -e task-clock,cycles,instructions,idq.mite_uops,idq.dsb_uops \
 #       split ...
-# See https://www.intel.com/content/www/us/en/content-details/841076/intel-mitigations-for-jump-conditional-code-erratum.html
-# and https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/mitigation-strategies-jcc-microcode.html
+# See https://www.intel.com/content/www/us/en/content-details/841076/\
+#     intel-mitigations-for-jump-conditional-code-erratum.html
+# and https://www.intel.com/content/www/us/en/developer/articles/technical/\
+#     software-security-guidance/best-practices/\
+#     mitigation-strategies-jcc-microcode.html
 #
 # The "lucky" code layout might be possible without Jcc-workaround CFLAGS,
 # that makes A/B benchmarking a bit less trivial.

@@ -3303,21 +3303,22 @@ option syntax @option{-@var{lines}}.  New scripts should use
 Put @var{size} bytes of @var{input} into each output file.
 @multiplierSuffixes{size}
 
-Content-defined chunking (CDC) might be done with @var{size} specifying @var{hash}
-function, average and maximum sizes of chunks:
+Content-defined chunking (CDC) might be done with @var{size} specifying
+@var{hash} function, average and maximum sizes of chunks:
 
 @example
 @var{hash}/@var{n}       @var{n} bytes on average using @var{hash} for CDC
 @var{hash}[@var{w}]/@var{n}    likewise but with sliding window of @var{w} bytes
-@var{hash}/@var{n}/@var{k}     @var{n} bytes on average but @var{k} bytes at most
-@var{hash}[@var{w}]/@var{n}/@var{k}  like @var{hash}[@var{w}]/@var{n} and @var{hash}/@var{n}/@var{k} combined
+@var{hash}/@var{n}/@var{k}     @var{n} bytes on average; @var{k} bytes at most
+@var{hash}[@var{w}]/@var{n}/@var{k}  like @var{hash}[@var{w}]/@var{n},
+                                     and @var{hash}/@var{n}/@var{k} combined
 @end example
 
 Supported @var{hash} functions are @samp{gear32}, @samp{gear64}, @samp{buz32}
 and @samp{buz64}.  BUZHash supports arbitrary sliding window size, GearHash
 window is fixed to be 32 and 64 bytes.  Alternative seed value for @var{hash}
-functions might be specified with @option{--random-source=@var{file}}.  Size of
-@var{file} needed depends on @var{hash} function:
+functions might be specified with @option{--random-source=@var{file}}.
+Size of @var{file} needed depends on @var{hash} function:
 
 @example
 @samp{gear32}  1KiB, unless entropy is completely absent

@@ -438,7 +438,8 @@ split_jccerr_ldadd = src/libsplit_jccerr.a
 src_split_LDADD += $(split_jccerr_ldadd)
 noinst_LIBRARIES += src/libsplit_jccerr.a
 src_libsplit_jccerr_a_SOURCES = src/split_cdc.c
-src_libsplit_jccerr_a_CFLAGS = -DJCCERR_CDC $(JCCERR_CFLAGS) $(CDC_CFLAGS) $(AM_CFLAGS)
+src_libsplit_jccerr_a_CFLAGS = -DJCCERR_CDC $(JCCERR_CFLAGS) \
+			       $(CDC_CFLAGS) $(AM_CFLAGS)
 endif
 
 src_tac_SOURCES = src/tac.c src/temp-stream.c

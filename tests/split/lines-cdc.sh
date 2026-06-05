@@ -63,7 +63,8 @@ done
 rm -f out
 
 # Ensure that <(same_bytes_ 128M) is still the same after split.
-printf 'BLAKE2b-256 (-) = 3be8bea6b02ec4e6e85af9c3bfda278f480e49fd390b89d55668535ec4e53259' \
+printf '%s%s' 'BLAKE2b-256 (-) = ' \
+       '3be8bea6b02ec4e6e85af9c3bfda278f480e49fd390b89d55668535ec4e53259' \
   > 128M.sum
 same_bytes_ 128M | cksum --check 128M.sum || framework_failure_
 for fn in buz32 buz64 gear32 gear64; do
