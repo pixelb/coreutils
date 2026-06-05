@@ -20,12 +20,19 @@
 #ifndef UUID_49BA2172_7262_4B8D_939C_3701442E7FC2
 # define UUID_49BA2172_7262_4B8D_939C_3701442E7FC2
 
-# include <idx.h>
 # include <stdint.h>
 
 /* 64 is the cache-line size for x86-64, Apple M-series chips use 128 bytes.
    128 works as a good default. It wastes 64 bytes in the worst-case.  */
 enum { CDC_TABLE_DEFAULT_ALIGNAS = 128 };
+
+extern uint64_t const buz_seed[256];
+
+extern void const *cdc_table;
+
+extern void const *unbuz_table;
+
+# ifndef BUZTAB
 
 /* HASH and LE values are passed via pointers due to u32|u64 difference.  */
 typedef void (*cdchash_fn) (void *phash, unsigned char const *p, idx_t count);
@@ -34,11 +41,6 @@ typedef unsigned char const *(*cdcfind_fn) (void *phash, void const *ple,
                                             unsigned char const *const end,
                                             idx_t window);
 
-extern uint64_t const buz_seed[256];
-
-extern void const *cdc_table;
-
-extern void const *unbuz_table;
 
 void buz32 (void *phash, unsigned char const *p, idx_t count);
 void buz64 (void *phash, unsigned char const *p, idx_t count);
@@ -88,5 +90,6 @@ rotl64 (uint64_t x, unsigned int n)
 {
   return (x << n) | (x >> ((-n) % 64));
 }
+# endif
 
 #endif

@@ -111,6 +111,7 @@ main (int argc, char **argv)
   puts ("/* Generated file -- DO NOT EDIT */\n"
         "#include <config.h>\n"
         "#include <stdint.h>\n"
+        "#include \"system.h\"\n"
         "#include \"split_cdc.h\"\n");
   printf (
       "alignas (CDC_TABLE_DEFAULT_ALIGNAS) uint64_t const buz_seed[%zu] = {\n",

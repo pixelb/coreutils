@@ -18,8 +18,10 @@
    along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 #include <config.h>
-#include "split_cdc.h"
+#include "system.h"
+
 #include "assure.h"
+#include "split_cdc.h"
 
 /* "Expected" BUZHash and GearHash performance in cycles/byte on various CPUs:
 

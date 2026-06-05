@@ -656,7 +656,7 @@ $(top_srcdir)/src/buz-seed.c: $(top_srcdir)/src/make-buz-table.c
 	  $(MKDIR_P) $(top_srcdir)/src/buz-tmp \
 	  && (cd $(top_srcdir)/src/buz-tmp \
 	      && $(BUILD_CC) $(BUILD_CPPFLAGS) $(BUILD_CFLAGS) \
-		$(BUILD_LDFLAGS) -o make-buz-table$(EXEEXT) \
+		$(BUILD_LDFLAGS) -DBUZTAB -o make-buz-table$(EXEEXT) \
 		$(abs_top_srcdir)/src/make-buz-table.c) \
 	  && rm -f $@ $@-t \
 	  && $(top_srcdir)/src/buz-tmp/make-buz-table$(EXEEXT) > $@-t \
