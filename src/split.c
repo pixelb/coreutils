@@ -172,7 +172,7 @@ static int const cdc_window_default[] = { 4095, 4095, 32, 64 };
 static int const cdc_window_min[] = { 4, 8, 32, 64 };
 
 static bool
-iscdc(enum Split_type type)
+iscdc (enum Split_type type)
 {
   return type == type_bytes_cdc || type == type_byteslines_cdc;
 }
@@ -1890,7 +1890,7 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
          window does not guarantee good PRF though.  It's possible to implement
          GearHash over shortened window, but it makes terminator calculation
          trickier and overall utility of reduced-window GearHash is unclear. */
-      if (cdc_isgear(hash) && *window != cdc_window_min[hash])
+      if (cdc_isgear (hash) && *window != cdc_window_min[hash])
         error (EXIT_FAILURE, 0, _ ("%s hash window must be %d"),
                cdc_names[hash], cdc_window_min[hash]);
       else if (cdc_isbuz (hash) && *window < cdc_window_min[hash])
