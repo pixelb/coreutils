@@ -3306,12 +3306,19 @@ Put @var{size} bytes of @var{input} into each output file.
 Content-defined chunking (CDC) might be done with @var{size} specifying
 @var{hash} function, average and maximum sizes of chunks:
 
+@c to avoid line length limits
+@macro vh
+@var{hash}
+@end macro
+@macro vn
+@var{n}
+@end macro
+
 @example
 @var{hash}/@var{n}       @var{n} bytes on average using @var{hash} for CDC
 @var{hash}[@var{w}]/@var{n}    likewise but with sliding window of @var{w} bytes
 @var{hash}/@var{n}/@var{k}     @var{n} bytes on average; @var{k} bytes at most
-@var{hash}[@var{w}]/@var{n}/@var{k}  like @var{hash}[@var{w}]/@var{n},
-                                     and @var{hash}/@var{n}/@var{k} combined
+@vh[@var{w}]/@vn/@var{k}  like @vh[@var{w}]/@vn and @vh/@vn/@var{k} combined
 @end example
 
 Supported @var{hash} functions are @samp{gear32}, @samp{gear64}, @samp{buz32}
