@@ -18,10 +18,10 @@
    along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 #ifndef UUID_49BA2172_7262_4B8D_939C_3701442E7FC2
-#define UUID_49BA2172_7262_4B8D_939C_3701442E7FC2
+# define UUID_49BA2172_7262_4B8D_939C_3701442E7FC2
 
-#include <idx.h>
-#include <stdint.h>
+# include <idx.h>
+# include <stdint.h>
 
 /* 64 is the cache-line size for x86-64, Apple M-series chips use 128 bytes.
    128 works as a good default. It wastes 64 bytes in the worst-case.  */
