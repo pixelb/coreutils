@@ -339,7 +339,6 @@ FILTER_LONG_LINES =						\
   \|^[^:]*NEWS:.*https\{,1\}://| d;					\
   \|^[^:]*doc/fdl.texi:| d;					\
   \|^[^:]*man/help2man:| d;					\
-  \|^[^:]*scripts/split-cdc/jcc-affected:| d;			\
   \|^[^:]*tests/cksum/sha[0-9]*sum.*\.pl[-:]| d;			\
   \|^[^:]*tests/pr/|{ \|^[^:]*tests/pr/pr-tests:| !d; };
 sc_long_lines:
