@@ -1876,7 +1876,7 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
         break;
       }
   if (hash == cdc_undef)
-    error (EXIT_FAILURE, 0, _ ("unknown rolling hash: %s"), quote (arg));
+    error (EXIT_FAILURE, 0, _("unknown rolling hash: %s"), quote (arg));
 
   if (*arg == '[')
     {
@@ -1891,10 +1891,10 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
          GearHash over shortened window, but it makes terminator calculation
          trickier and overall utility of reduced-window GearHash is unclear. */
       if (cdc_isgear (hash) && *window != cdc_window_min[hash])
-        error (EXIT_FAILURE, 0, _ ("%s hash window must be %d"),
+        error (EXIT_FAILURE, 0, _("%s hash window must be %d"),
                cdc_names[hash], cdc_window_min[hash]);
       else if (cdc_isbuz (hash) && *window < cdc_window_min[hash])
-        error (EXIT_FAILURE, 0, _ ("%s hash window must be at least %d"),
+        error (EXIT_FAILURE, 0, _("%s hash window must be at least %d"),
                cdc_names[hash], cdc_window_min[hash]);
 
       arg = next + 1;
@@ -1903,11 +1903,11 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
     *window = cdc_window_default[hash];
   else
     error (EXIT_FAILURE, 0,
-           _ ("cannot parse %s: neither hash window nor chunk size"),
+           _("cannot parse %s: neither hash window nor chunk size"),
            quote (arg));
 
   if (*arg != '/')
-    error (EXIT_FAILURE, 0, _ ("cannot parse %s as chunk size"), quote (arg));
+    error (EXIT_FAILURE, 0, _("cannot parse %s as chunk size"), quote (arg));
   arg++; /* skip '/' */
 
   char *next = NULL;
@@ -1919,7 +1919,7 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
      easier to reason about chunks having at least WINDOW bytes each.  */
   if (*avgsz <= *window)
     error (EXIT_FAILURE, 0,
-           _ ("average chunk (%jd) must be larger than hash window (%jd)"),
+           _("average chunk (%jd) must be larger than hash window (%jd)"),
            *avgsz, *window);
 
   /* Let's set ~40 MiB as the largest chunk size that is supported by decision
@@ -1942,7 +1942,7 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
   intmax_t const hash32_chunk_max = INTMAX_C (42000000);
   if (cdc_is32 (hash) && *avgsz > hash32_chunk_max)
     error (EXIT_FAILURE, 0,
-           _ ("average chunk over 40MiB/42MB needs 64-bit hash"));
+           _("average chunk over 40MiB/42MB needs 64-bit hash"));
 
   /* There is no explicit "signaling" value to skip MAXSZ code altogether.
      First, 2^63 is large enough.  Second, CDC is probabilistic anyway :-P  */
@@ -1955,7 +1955,7 @@ parse_cdc (intmax_t *window, intmax_t *avgsz, intmax_t *maxsz, char const *arg)
 
   if (*maxsz <= *avgsz)
     error (EXIT_FAILURE, 0,
-           _ ("maximum chunk (%jd) must be larger than average chunk (%jd)"),
+           _("maximum chunk (%jd) must be larger than average chunk (%jd)"),
            *maxsz, *avgsz);
 
   return hash;
@@ -2301,7 +2301,7 @@ main (int argc, char **argv)
           in_blk_size
               = xnumtoumax (optarg, 10, 1,
                             MIN (SYS_BUFSIZE_MAX, MIN (IDX_MAX, SIZE_MAX) - 1),
-                            byte_multipliers, _ ("invalid IO block size"), 0,
+                            byte_multipliers, _("invalid IO block size"), 0,
                             XTOINT_MIN_RANGE);
           break;
 
@@ -2395,7 +2395,7 @@ main (int argc, char **argv)
   int const buz_window_max = MIN (in_blk_size, IO_BUFSIZE);
   if (iscdc (split_type) && cdc_isbuz (cdc_type) && buz_window_max < w_units)
     error (EXIT_FAILURE, 0,
-           _ ("%s[%jd] exceeds the largest supported BUZHash window (%d)"),
+           _("%s[%jd] exceeds the largest supported BUZHash window (%d)"),
            cdc_names[cdc_type], w_units, buz_window_max);
 
   /* The I/O buffer is IN_BLK_SIZE bytes and is aligned to the PAGE_SIZE.
