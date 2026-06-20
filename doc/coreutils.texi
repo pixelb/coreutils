@@ -14492,6 +14492,14 @@ Symbolic links are resolved in the specified file names,
 and they are resolved before any subsequent @samp{..} components are processed.
 This is the default mode of operation.
 
+@optItem{realpath,-H,}
+@optItemx{realpath,--resolve-basename,}
+Resolve symbolic links only if they are the final component of the
+specified file names.  If the final component is a symbolic link,
+resolve it recursively.  Do not resolve symbolic links in parent
+directories, so the resulting file names may still contain symbolic
+links in parent components.
+
 @optItem{realpath,-q,}
 @optItemx{realpath,--quiet,}
 Suppress diagnostic messages for specified file names.

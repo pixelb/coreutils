@@ -51,6 +51,11 @@ GNU coreutils NEWS                                    -*- outline -*-
   Also %Qn is a newly supported format combination to quote file names,
   leaving the existing %n format for when quoting is not desired.
 
+** New Features
+
+  'realpath' now supports -H,--resolve-basename, to recursively resolve
+  only a final symbolic link while preserving symlinks in parent directories.
+
 ** Improvements
 
   'df', 'du', 'ls', 'od', 'pr', and 'sort' now escape invalid arguments in error

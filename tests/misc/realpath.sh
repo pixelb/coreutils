@@ -35,6 +35,9 @@ test -d /dev || framework_failure_
 mkdir -p dir1/dir2 || framework_failure_
 ln -s dir1/dir2 ldir2 || framework_failure_
 touch dir1/f dir1/dir2/f || framework_failure_
+ln -s f dir1/dir2/flink || framework_failure_
+ln -s flink dir1/dir2/flink2 || framework_failure_
+ln -s missing dir1/dir2/broken || framework_failure_
 ln -s / one || framework_failure_
 ln -s // two || framework_failure_
 ln -s /// three || framework_failure_
@@ -59,9 +62,30 @@ returns_ 1 realpath --relative-base= --relative-to=. . || fail=1
 
 # symlink resolution
 this=$(realpath .)
+ln -s "$this/dir1/f" dir1/dir2/abslink || framework_failure_
 test "$(realpath ldir2/..)" = "$this/dir1" || fail=1
 test "$(realpath -L ldir2/..)" = "$this" || fail=1
 test "$(realpath -s ldir2)" = "$this/ldir2" || fail=1
+test "$(realpath --resolve-basename ldir2/f)" = "$this/ldir2/f" \
+  || fail=1
+test "$(realpath -H ldir2/flink)" = "$this/ldir2/f" || fail=1
+test "$(realpath --resolve-basename ldir2/flink)" = "$this/ldir2/f" \
+  || fail=1
+test "$(realpath --resolve-basename ldir2/flink2)" = "$this/ldir2/f" \
+  || fail=1
+test "$(realpath --resolve-basename ldir2/abslink)" = "$this/dir1/f" \
+  || fail=1
+test "$(realpath --resolve-basename ldir2/broken)" \
+  = "$this/ldir2/missing" || fail=1
+returns_ 1 realpath -e --resolve-basename ldir2/broken || fail=1
+returns_ 1 realpath --resolve-basename missing-dir/f || fail=1
+test "$(realpath -m --resolve-basename missing-dir/f)" \
+  = "$this/missing-dir/f" || fail=1
+test "$(realpath -s --resolve-basename ldir2/flink)" = "$this/ldir2/f" \
+  || fail=1
+test "$(realpath --resolve-basename -s ldir2/flink)" \
+  = "$this/ldir2/flink" || fail=1
+test "$(realpath -H -s ldir2/flink)" = "$this/ldir2/flink" || fail=1
 
 # relative string handling
 test $(realpath -m --relative-to=prefix prefixed/1) = '../prefixed/1' || fail=1

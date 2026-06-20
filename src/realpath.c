@@ -22,7 +22,10 @@
 #include <sys/types.h>
 
 #include "system.h"
+#include "areadlink.h"
 #include "canonicalize.h"
+#include "eloop-threshold.h"
+#include "filenamecat.h"
 #include "relpath.h"
 
 /* The official name of this program (e.g., no 'g' prefix).  */
@@ -38,6 +41,7 @@ enum
 
 static bool verbose = true;
 static bool logical;
+static bool resolve_basename;
 static bool use_nuls;
 static char const *can_relative_to;
 static char const *can_relative_base;
@@ -47,6 +51,7 @@ static struct option const longopts[] =
   {"canonicalize", no_argument, NULL, 'E'},
   {"canonicalize-existing", no_argument, NULL, 'e'},
   {"canonicalize-missing", no_argument, NULL, 'm'},
+  {"resolve-basename", no_argument, NULL, 'H'},
   {"relative-to", required_argument, NULL, RELATIVE_TO_OPTION},
   {"relative-base", required_argument, NULL, RELATIVE_BASE_OPTION},
   {"quiet", no_argument, NULL, 'q'},
@@ -83,6 +88,9 @@ Print the resolved absolute file name.\n\
 \n\
 "));
       oputs (_("\
+  -H, --resolve-basename       resolve symlinks only in the final component\n\
+"));
+      oputs (_("\
   -L, --logical                resolve '..' components before symlinks\n\
 "));
       oputs (_("\
@@ -110,11 +118,102 @@ Print the resolved absolute file name.\n\
   exit (status);
 }
 
+static bool
+parent_directory_exists (char const *fname, int can_mode)
+{
+  if ((can_mode & CAN_MODE_MASK) == CAN_MISSING)
+    return true;
+
+  char *dir = dir_name (fname);
+  struct stat sb;
+  bool ok = stat (dir, &sb) == 0;
+  if (ok)
+    {
+      if (! S_ISDIR (sb.st_mode))
+        {
+          errno = ENOTDIR;
+          ok = false;
+        }
+    }
+  else if (errno == EOVERFLOW)
+    ok = true;
+
+  int saved_errno = errno;
+  free (dir);
+  errno = saved_errno;
+  return ok;
+}
+
+/* Dereference the basename of FNAME, but preserve any symlink spelling in
+   parent directories.  Relative link values are resolved against the
+   previous link's parent directory, then cleaned without dereferencing
+   symlinks in parent directories.  */
+static char *
+realpath_resolve_basename (char const *fname, int can_mode)
+{
+  can_mode |= CAN_NOLINKS;
+  char *can_fname = canonicalize_filename_mode (fname, can_mode);
+
+  for (idx_t num_links = 0; can_fname; num_links++)
+    {
+      if (! parent_directory_exists (can_fname, can_mode))
+        {
+          int saved_errno = errno;
+          free (can_fname);
+          errno = saved_errno;
+          return NULL;
+        }
+
+      char *linkname = areadlink_with_size (can_fname, 63);
+      if (!linkname)
+        {
+          if (errno == EINVAL
+              || (can_mode & CAN_MODE_MASK) != CAN_EXISTING)
+            return can_fname;
+
+          int saved_errno = errno;
+          free (can_fname);
+          errno = saved_errno;
+          return NULL;
+        }
+
+      if (__eloop_threshold () <= num_links)
+        {
+          free (linkname);
+          free (can_fname);
+          errno = ELOOP;
+          return NULL;
+        }
+
+      char *next_name;
+      if (IS_ABSOLUTE_FILE_NAME (linkname))
+        next_name = xstrdup (linkname);
+      else
+        {
+          char *dir = dir_name (can_fname);
+          next_name = file_name_concat (dir, linkname, NULL);
+          free (dir);
+        }
+
+      free (linkname);
+      free (can_fname);
+      can_fname = canonicalize_filename_mode (next_name, can_mode);
+      int saved_errno = errno;
+      free (next_name);
+      errno = saved_errno;
+    }
+
+  return NULL;
+}
+
 /* A wrapper around canonicalize_filename_mode(),
    to call it twice when in LOGICAL mode.  */
 static char *
 realpath_canon (char const *fname, int can_mode)
 {
+  if (resolve_basename)
+    return realpath_resolve_basename (fname, can_mode);
+
   char *can_fname = canonicalize_filename_mode (fname, can_mode);
   if (logical && can_fname)  /* canonicalize again to resolve symlinks.  */
     {
@@ -208,7 +307,7 @@ main (int argc, char **argv)
 
   while (true)
     {
-      int c = getopt_long (argc, argv, "EeLmPqsz", longopts, NULL);
+      int c = getopt_long (argc, argv, "EeHLmPqsz", longopts, NULL);
       if (c == -1)
         break;
       switch (c)
@@ -228,14 +327,22 @@ main (int argc, char **argv)
         case 'L':
           can_mode |= CAN_NOLINKS;
           logical = true;
+          resolve_basename = false;
           break;
         case 's':
           can_mode |= CAN_NOLINKS;
           logical = false;
+          resolve_basename = false;
           break;
         case 'P':
           can_mode &= ~CAN_NOLINKS;
           logical = false;
+          resolve_basename = false;
+          break;
+        case 'H':
+          can_mode |= CAN_NOLINKS;
+          logical = false;
+          resolve_basename = true;
           break;
         case 'q':
           verbose = false;
