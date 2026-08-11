@@ -45,8 +45,16 @@ static char const **usvars;
 static idx_t usvars_alloc;
 static idx_t usvars_used;
 
-/* Storage for variables passed to putenv from --from0.  */
+/* Storage for entries read by --from0.  */
 static char *from0_buffer;
+
+/* An environment vector managed without libc normalization.  */
+struct raw_environment
+{
+  char **variable;
+  idx_t used;
+  idx_t allocated;
+};
 
 /* Annotate the output with extra info to aid the user.  */
 static bool dev_debug;
@@ -142,7 +150,7 @@ Set each NAME to VALUE in the environment and run COMMAND.\n\
 "));
       oputs (_("\
       --from0=FILE\n\
-         set variables from NUL-delimited assignments in FILE\n\
+         read NUL-delimited environment entries from FILE\n\
 "));
       oputs (_("\
   -0, --null\n\
@@ -220,6 +228,38 @@ unset_envvars (void)
     }
 }
 
+/* Return true if ENTRY is an assignment whose name is NAME.  */
+static bool
+entry_has_name (char const *entry, char const *name, idx_t name_length)
+{
+  char const *eq = strchr (entry, '=');
+  return (eq && eq - entry == name_length
+          && memcmp (entry, name, name_length) == 0);
+}
+
+/* Remove the requested variables from ENV without libc normalization.  */
+static void
+unset_raw_envvars (struct raw_environment *env)
+{
+  for (idx_t i = 0; i < usvars_used; ++i)
+    {
+      char const *name = usvars[i];
+      devmsg ("unset:    %s\n", name);
+
+      if (! *name || strchr (name, '='))
+        error (EXIT_CANCELED, EINVAL, _("cannot unset %s"), quoteaf (name));
+
+      idx_t name_length = strlen (name);
+      idx_t dest = 0;
+      for (idx_t source = 0; source < env->used; ++source)
+        if (! entry_has_name (env->variable[source], name, name_length))
+          env->variable[dest++] = env->variable[source];
+
+      env->used = dest;
+      env->variable[dest] = NULL;
+    }
+}
+
 /* Add ASSIGNMENT to the environment.  EQ points to its '=' byte.  */
 static void
 set_envvar (char *assignment, char *eq)
@@ -233,9 +273,36 @@ set_envvar (char *assignment, char *eq)
     }
 }
 
-/* Merge the NUL-delimited assignments in FILE into the environment.  */
+/* Add ASSIGNMENT to ENV without libc normalization.  EQ points to its
+   '=' byte.  Replace the first existing assignment with the same name,
+   as putenv does, or append ASSIGNMENT if there is none.  */
 static void
-set_envvars_from_file (char const *file)
+set_raw_envvar (struct raw_environment *env, char *assignment, char *eq)
+{
+  devmsg ("setenv:   %s\n", assignment);
+
+  idx_t name_length = eq - assignment;
+  for (idx_t i = 0; i < env->used; ++i)
+    if (entry_has_name (env->variable[i], assignment, name_length))
+      {
+        env->variable[i] = assignment;
+        return;
+      }
+
+  if (env->used + 1 == env->allocated)
+    {
+      env->variable = xpalloc (env->variable, &env->allocated, 1, -1,
+                               sizeof *env->variable);
+      environ = env->variable;
+    }
+
+  env->variable[env->used++] = assignment;
+  env->variable[env->used] = NULL;
+}
+
+/* Read the NUL-delimited environment entries in FILE.  */
+static size_t
+read_env_file (char const *file)
 {
   size_t size;
   if (streq (file, "-"))
@@ -252,6 +319,15 @@ set_envvars_from_file (char const *file)
     error (EXIT_CANCELED, 0, _("%s: file must end with a NUL byte"),
            quotef (file));
 
+  return size;
+}
+
+/* Merge the NUL-delimited assignments in FILE into the environment.  */
+static void
+set_envvars_from_file (char const *file)
+{
+  size_t size = read_env_file (file);
+
   char *end = from0_buffer + size;
   for (char *assignment = from0_buffer; assignment < end; )
     {
@@ -265,6 +341,32 @@ set_envvars_from_file (char const *file)
       set_envvar (assignment, eq);
       assignment = next;
     }
+}
+
+/* Replace the environment with the NUL-delimited entries in FILE,
+   preserving the entries byte-for-byte and in their original order.  */
+static void
+set_raw_environment_from_file (struct raw_environment *env,
+                               char const *file)
+{
+  size_t size = read_env_file (file);
+  idx_t entry_count = 0;
+  for (size_t i = 0; i < size; ++i)
+    entry_count += from0_buffer[i] == '\0';
+
+  env->allocated = entry_count + 1;
+  env->variable = xnmalloc (env->allocated, sizeof *env->variable);
+  env->used = 0;
+
+  char *entry = from0_buffer;
+  for (size_t i = 0; i < size; ++i)
+    if (from0_buffer[i] == '\0')
+      {
+        env->variable[env->used++] = entry;
+        entry = from0_buffer + i + 1;
+      }
+  env->variable[env->used] = NULL;
+  environ = env->variable;
 }
 
 /* Return a pointer to the end of a valid ${VARNAME} string, or NULL.
@@ -830,6 +932,11 @@ main (int argc, char **argv)
   char const *newdir = NULL;
   char const *from0_file = NULL;
   char *argv0 = NULL;
+  struct raw_environment raw_environment;
+#ifdef lint
+  raw_environment.variable = NULL;
+  char **initial_environ = environ;
+#endif
 
   initialize_main (&argc, &argv);
   set_program_name (argv[0]);
@@ -922,23 +1029,36 @@ main (int argc, char **argv)
         }
     }
 
-  if (ignore_environment)
+  bool raw_from0 = ignore_environment && from0_file;
+  if (raw_from0)
     {
       devmsg ("cleaning environ\n");
-      static char *dummy_environ[] = { NULL };
-      environ = dummy_environ;
+      set_raw_environment_from_file (&raw_environment, from0_file);
+      unset_raw_envvars (&raw_environment);
     }
+  else
+    {
+      if (ignore_environment)
+        {
+          devmsg ("cleaning environ\n");
+          static char *dummy_environ[] = { NULL };
+          environ = dummy_environ;
+        }
 
-  if (from0_file)
-    set_envvars_from_file (from0_file);
+      if (from0_file)
+        set_envvars_from_file (from0_file);
 
-  if (! ignore_environment || from0_file)
-    unset_envvars ();
+      if (! ignore_environment || from0_file)
+        unset_envvars ();
+    }
 
   char *eq;
   while (optind < argc && (eq = strchr (argv[optind], '=')))
     {
-      set_envvar (argv[optind], eq);
+      if (raw_from0)
+        set_raw_envvar (&raw_environment, argv[optind], eq);
+      else
+        set_envvar (argv[optind], eq);
       optind++;
     }
 
@@ -972,6 +1092,11 @@ main (int argc, char **argv)
       /* Print the environment and exit.  */
       for (char *const *e = environ; *e; ++e)
         print_envvar (*e, terminator, quote_output);
+#ifdef lint
+      environ = initial_environ;
+      free (raw_environment.variable);
+      free (from0_buffer);
+#endif
       return EXIT_SUCCESS;
     }
 

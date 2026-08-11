@@ -71,8 +71,9 @@ GNU coreutils NEWS                                    -*- outline -*-
 
 ** New Features
 
-  'env' now supports --from0=FILE to add NUL-delimited environment variable
-  assignments read from a file.
+  'env' now supports --from0=FILE to read NUL-delimited environment entries
+  from a file.  With -i, entries are preserved exactly, allowing full
+  round-tripping of environments containing duplicate or nonstandard entries.
 
 ** Changes in behavior
 
