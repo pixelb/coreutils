@@ -354,6 +354,7 @@ all_tests =					\
   tests/date/date-tz.sh				\
   tests/misc/dircolors.pl			\
   tests/misc/dirname.pl				\
+  tests/env/env-from0.sh			\
   tests/env/env-null.sh				\
   tests/env/env-S.pl				\
   tests/env/env-S-script.sh			\
